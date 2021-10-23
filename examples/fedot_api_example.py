@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 from fedot.api.main import Fedot
 from fedot.core.data.data import InputData
@@ -101,8 +102,34 @@ def run_classification_multiobj_example(with_plot=True, timeout=None):
     return prediction
 
 
+def run_multivariate_ts_example():
+    """ Example of time series forecasting task with multiple data sources """
+    data_path = f'{fedot_project_root()}/examples/data/ts_sea_level.csv'
+
+    df = pd.read_csv(data_path)
+
+    # Wrap time series into dictionary
+    dataset = {'Level': np.array(df['Level']),
+               'Neighboring_level': np.array(df['Neighboring level'])}
+
+    # Define forecast length and define parameters - forecast length
+    forecast_length = 30
+    task_parameters = TsForecastingParams(forecast_length=forecast_length)
+
+    # init model for the time series forecasting
+    model = Fedot(problem='ts_forecasting', task_params=task_parameters,
+                  timeout=0.2, preset='ts_tun')
+
+    # run AutoML model design in the same way
+    pipeline = model.fit(features=dataset, target='Level')
+
+    # use model to obtain forecast
+    forecast = model.predict(dataset)
+
+
 if __name__ == '__main__':
-    run_classification_example()
-    run_regression_example()
-    run_ts_forecasting_example()
-    run_classification_multiobj_example()
+    run_multivariate_ts_example()
+    # run_classification_example()
+    # run_regression_example()
+    # run_ts_forecasting_example()
+    # run_classification_multiobj_example()
