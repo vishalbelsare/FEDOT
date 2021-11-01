@@ -1,10 +1,23 @@
-from typing import Optional
 from copy import copy
+from typing import Optional
 
 import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+
+try:
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+except ModuleNotFoundError:
+    torch = object()
+
+
+    class TorchMock:
+        Module = list
+
+
+    nn = TorchMock
+    print('Torch non installed, continue')
+
 from scipy import stats
 from scipy.special import inv_boxcox, boxcox
 from statsmodels.tsa.api import STLForecast
