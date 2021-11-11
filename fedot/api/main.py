@@ -63,11 +63,10 @@ class Fedot:
                  check_mode: bool = False):
 
         # Classes for dealing with metrics, data sources and hyperparameters
-        self.data_sources = ApiDataSources()
         self.metrics = ApiMetrics(problem)
         self.api_composer = ApiComposer(problem)
-
         self.composer_params = ApiParams()
+
         input_params = {'problem': problem, 'preset': preset, 'timeout': timeout,
                         'composer_params': composer_params, 'task_params': task_params,
                         'seed': seed, 'verbose_level': verbose_level,
@@ -76,14 +75,15 @@ class Fedot:
         self.api_params['current_model'] = None
         self.api_params['check_mode'] = check_mode
 
-        metric_names = self.api_params['metric_name']
-        self.task_metrics, self.composer_metrics, self.tuner_metrics = self.metrics.get_metrics_for_task(metric_names)
+        metric_name = self.api_params['metric_name']
+        self.task_metrics, self.composer_metrics, self.tuner_metrics = self.metrics.get_metrics_for_task(metric_name)
         self.api_params['tuner_metric'] = self.tuner_metrics
 
         # Update timeout and initial_pipeline parameters
         self.update_params(timeout, initial_pipeline)
+        self.data_sources = ApiDataSources(task=self.api_params['task'])
 
-        self.target_name = None
+        self.target = None
         self.train_data = None
         self.current_pipeline = None
         self.best_models = None
@@ -104,10 +104,8 @@ class Fedot:
         :return: Pipeline object
         """
 
-        self.target_name = target
-        self.train_data = self.data_sources.define_data(ml_task=self.api_params['task'],
-                                                        features=features, target=target,
-                                                        is_predict=False)
+        self.target = target
+        self.train_data = self.data_sources.define_data(features=features, target=target, is_predict=False)
 
         is_composing_required = True
         if self.api_params['current_model'] is not None:
@@ -144,11 +142,9 @@ class Fedot:
         if self.current_pipeline is None:
             raise ValueError(NOT_FITTED_ERR_MSG)
 
-        self.test_data = self.data_sources.define_data(ml_task=self.api_params['task'], target=self.target_name,
-                                                       features=features, is_predict=True)
+        self.test_data = self.data_sources.define_data(target=self.target, features=features, is_predict=True)
 
-        self.prediction = self.data_sources.define_predictions(task_type=self.api_params['task'].task_type,
-                                                               current_pipeline=self.current_pipeline,
+        self.prediction = self.data_sources.define_predictions(current_pipeline=self.current_pipeline,
                                                                test_data=self.test_data)
 
         if save_predictions:
@@ -173,7 +169,7 @@ class Fedot:
             raise ValueError(NOT_FITTED_ERR_MSG)
 
         if self.api_params['task'].task_type == TaskTypesEnum.classification:
-            self.test_data = self.data_sources.define_data(ml_task=self.api_params['task'], target=self.target_name,
+            self.test_data = self.data_sources.define_data(target=self.target,
                                                            features=features, is_predict=True)
 
             mode = 'full_probs' if probs_for_all_classes else 'probs'
@@ -208,8 +204,7 @@ class Fedot:
         if self.api_params['task'].task_type != TaskTypesEnum.ts_forecasting:
             raise ValueError('Forecasting can be used only for the time series')
 
-        self.test_data = self.data_sources.define_data(ml_task=self.api_params['task'],
-                                                       target=self.target_name,
+        self.test_data = self.data_sources.define_data(target=self.target,
                                                        features=pre_history,
                                                        is_predict=True)
 
@@ -245,11 +240,11 @@ class Fedot:
                 self.predict_proba(self.test_data)
                 plot_roc_auc(self.test_data, self.prediction)
             else:
-                # TODO implement other visualizations
                 self.api_params['logger'].error('Not supported yet')
-
+                raise NotImplementedError(f"For task {self.api_params['task']} plot prediction is not supported")
         else:
             self.api_params['logger'].error('No prediction to visualize')
+            raise ValueError(f'Prediction from model is empty')
 
     def get_metrics(self,
                     target: Union[np.ndarray, pd.Series] = None,
@@ -274,8 +269,6 @@ class Fedot:
             else:
                 self.test_data.target = target[:len(self.prediction.predict)]
 
-        real = self.test_data
-
         # TODO change to sklearn metrics
         if not isinstance(metric_names, List):
             metric_names = [metric_names]
@@ -285,18 +278,16 @@ class Fedot:
             if self.metrics.get_composer_metrics_mapping(metric_name) is NotImplemented:
                 self.api_params['logger'].warn(f'{metric_name} is not available as metric')
             else:
-                metric_cls = MetricsRepository().metric_class_by_id(
-                    self.metrics.get_composer_metrics_mapping(metric_name))
+                composer_metric = self.metrics.get_composer_metrics_mapping(metric_name)
+                metric_cls = MetricsRepository().metric_class_by_id(composer_metric)
                 prediction = deepcopy(self.prediction)
                 if metric_name == "roc_auc":  # for roc-auc we need probabilities
                     prediction.predict = self.predict_proba(self.test_data)
                 real = deepcopy(self.test_data)
 
-                task_type = self.api_params['task'].task_type
-                real.target, prediction.predict = self.metrics.check_prediction_shape(task=task_type,
-                                                                                      metric_name=metric_name,
-                                                                                      real=real,
-                                                                                      prediction=prediction)
+                real.target, prediction.predict = self.data_sources.correct_shape(metric_name=metric_name,
+                                                                                  real=real,
+                                                                                  prediction=prediction)
 
                 metric_value = abs(metric_cls.metric(reference=real,
                                                      predicted=prediction))
@@ -306,6 +297,7 @@ class Fedot:
         return calculated_metrics
 
     def save_predict(self, predicted_data: OutputData):
+        """ Save pipeline forecasts in csv file """
         if len(predicted_data.predict.shape) >= 2:
             prediction = predicted_data.predict.tolist()
         else:
