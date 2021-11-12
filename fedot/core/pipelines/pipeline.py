@@ -11,10 +11,9 @@ from fedot.core.log import Log, default_log
 from fedot.core.optimisers.timer import Timer
 from fedot.core.optimisers.utils.population_utils import input_data_characteristics
 from fedot.core.pipelines.node import Node, PrimaryNode
-from fedot.core.pipelines.preprocessing import DataPreprocessing
+from fedot.core.pipelines.preprocessing import DataPreprocessor
 from fedot.core.pipelines.template import PipelineTemplate
 from fedot.core.pipelines.tuning.unified import PipelineTuner
-from fedot.core.repository.dataset_types import DataTypesEnum
 
 ERROR_PREFIX = 'Invalid pipeline configuration:'
 
@@ -25,6 +24,7 @@ class Pipeline(Graph):
 
     :param nodes: Node object(s)
     :param log: Log object to record messages
+    :param preprocessing_needed: is there a need to preprocess tabular data
 
     .. note::
         fitted_on_data stores the data which were used in last pipeline fitting (equals None if pipeline hasn't been
@@ -32,12 +32,13 @@ class Pipeline(Graph):
     """
 
     def __init__(self, nodes: Optional[Union[Node, List[Node]]] = None,
-                 log: Log = None):
+                 log: Log = None, preprocessing_needed: bool = True):
+
+        self.preprocessing_needed = preprocessing_needed
 
         self.computation_time = None
         self.template = None
         self.fitted_on_data = {}
-        self.pre_proc_encoders = {}
         self.log = log
         if not log:
             self.log = default_log(__name__)
@@ -45,7 +46,7 @@ class Pipeline(Graph):
             self.log = log
 
         # Define data preprocessor
-        self.preprocessor = DataPreprocessing(self.log)
+        self.preprocessor = DataPreprocessor(self.log)
         super().__init__(nodes)
 
     def fit_from_scratch(self, input_data: Union[InputData, MultiModalData] = None):
@@ -165,8 +166,11 @@ class Pipeline(Graph):
 
         # Make copy of the input data to avoid performing inplace operations
         copied_input_data = copy(input_data)
-        copied_input_data = self.preprocessor.prepare_for_fit(pipeline=self,
-                                                              data=copied_input_data)
+        if self.preprocessing_needed:
+            copied_input_data = self.preprocessor.obligatory_prepare_for_fit(copied_input_data)
+        # Make additional preprocessing if it is needed
+        copied_input_data = self.preprocessor.optional_prepare_for_fit(pipeline=self,
+                                                                       data=copied_input_data)
 
         copied_input_data = self._assign_data_to_nodes(copied_input_data)
 
@@ -218,8 +222,12 @@ class Pipeline(Graph):
 
         # Make copy of the input data to avoid performing inplace operations
         copied_input_data = copy(input_data)
-        copied_input_data = self.preprocessor.prepare_for_predict(pipeline=self,
-                                                                  data=copied_input_data)
+        if self.preprocessing_needed:
+            copied_input_data = self.preprocessor.obligatory_prepare_for_predict(copied_input_data)
+        # Make additional preprocessing if it is needed
+        copied_input_data = self.preprocessor.optional_prepare_for_predict(pipeline=self,
+                                                                           data=copied_input_data)
+
         copied_input_data = self._assign_data_to_nodes(copied_input_data)
 
         result = self.root_node.predict(input_data=copied_input_data, output_mode=output_mode)
