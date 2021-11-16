@@ -403,20 +403,7 @@ def _has_data_categorical(data: InputData) -> bool:
     :param data: InputData
     :return data_has_categorical_columns: bool, whether data has categorical columns or not
     """
-    data_has_categorical_columns = False
-
-    if isinstance(data.features, list) or len(data.features.shape) == 1:
-        data_has_categorical_columns = _is_values_categorical(data.features)
+    if isinstance(data.features.dtype, int) or isinstance(data.features.dtype, float):
+        return False
     else:
-        num_columns = data.features.shape[1]
-        for col_index in range(num_columns):
-            if data_has_categorical_columns:
-                break
-            data_has_categorical_columns = _is_values_categorical(data.features[:, col_index])
-
-    return data_has_categorical_columns
-
-
-def _is_values_categorical(values: List):
-    # Check if any value in list has 'string' type
-    return any(list(map(lambda x: isinstance(x, str), values)))
+        return True
