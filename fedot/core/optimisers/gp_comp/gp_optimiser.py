@@ -52,8 +52,8 @@ class GPGraphOptimiserParameters:
                  regularization_type: RegularizationTypesEnum = RegularizationTypesEnum.none,
                  genetic_scheme_type: GeneticSchemeTypesEnum = GeneticSchemeTypesEnum.generational,
                  with_auto_depth_configuration: bool = False, depth_increase_step: int = 3,
-                 multi_objective: bool = False,
-                 history_folder: str = None):
+                 multi_objective: bool = False, history_folder: str = None,
+                 use_stopping_criteria: bool = True, stopping_after_n_generation: int = 7):
 
         self.selection_types = selection_types
         self.crossover_types = crossover_types
@@ -64,6 +64,8 @@ class GPGraphOptimiserParameters:
         self.depth_increase_step = depth_increase_step
         self.multi_objective = multi_objective
         self.history_folder = history_folder
+        self.use_stopping_criteria = use_stopping_criteria
+        self.stopping_after_n_generation = stopping_after_n_generation
 
     def set_default_params(self):
         """
@@ -103,8 +105,7 @@ class GPGraphOptimiser:
                  graph_generation_params: 'GraphGenerationParams',
                  metrics: List[MetricsEnum],
                  parameters: Optional[GPGraphOptimiserParameters] = None,
-                 log: Log = None, archive_type=None,
-                 use_stopping_criteria=True, stopping_after_n_generation=7):
+                 log: Log = None, archive_type=None):
 
         if not log:
             self.log = default_log(__name__)
@@ -132,8 +133,9 @@ class GPGraphOptimiser:
         if not self.requirements.pop_size:
             self.requirements.pop_size = 10
 
-        if use_stopping_criteria:
-            self.stopping_after_n_generation = stopping_after_n_generation
+        self.use_stopping_criteria = parameters.use_stopping_criteria
+        if self.use_stopping_criteria:
+            self.stopping_after_n_generation = parameters.stopping_after_n_generation
 
         self.population = None
         self.initial_graph = initial_graph
@@ -192,9 +194,11 @@ class GPGraphOptimiser:
 
             self.log_info_about_best()
 
-            while t.is_time_limit_reached(self.generation_num) is False \
-                    and self.generation_num != self.requirements.num_of_generations - 1 \
-                    or self._is_stopping_criteria_triggered():
+            while (t.is_time_limit_reached(self.generation_num) is False
+                   and self.generation_num != self.requirements.num_of_generations - 1):
+
+                if self._is_stopping_criteria_triggered():
+                    break
 
                 self.log.info(f'Generation num: {self.generation_num}')
 
@@ -425,9 +429,12 @@ class GPGraphOptimiser:
         return individuals_set
 
     def _is_stopping_criteria_triggered(self):
-        if self.num_of_gens_without_improvements == self.stopping_after_n_generation:
-            self.log.info(f'GP_Optimiser: Early stopping criteria was triggered and composing finished')
-            return True
+        if self.use_stopping_criteria:
+            if self.num_of_gens_without_improvements == self.stopping_after_n_generation:
+                self.log.info(f'GP_Optimiser: Early stopping criteria was triggered and composing finished')
+                return True
+        else:
+            return False
 
 
 @dataclass
