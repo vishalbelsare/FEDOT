@@ -165,15 +165,16 @@ class ApiComposer:
 
         optimizer_parameters = GPGraphOptimiserParameters(
             genetic_scheme_type=genetic_scheme_type,
-            mutation_types=[boosting_mutation, parameter_change_mutation,
+            mutation_types=[boosting_mutation,
+                            parameter_change_mutation,
                             MutationTypesEnum.single_edge,
                             MutationTypesEnum.single_change,
                             MutationTypesEnum.single_drop,
-                            MutationTypesEnum.single_add],
-            crossover_types=[CrossoverTypesEnum.one_point,
-                             CrossoverTypesEnum.subtree],
+                            MutationTypesEnum.single_add
+                            ],
+            crossover_types=[CrossoverTypesEnum.one_point, CrossoverTypesEnum.subtree],
             history_folder=composer_params.get('history_folder'),
-            use_stopping_criteria=composer_params['use_stoping_criteria'],
+            use_stopping_criteria=composer_params['use_stopping_criteria'],
             stopping_after_n_generation=composer_params['stopping_after_n_generation']
         )
 
