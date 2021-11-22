@@ -19,8 +19,7 @@ from fedot.core.optimisers.adapters import PipelineAdapter
 from fedot.core.optimisers.gp_comp.gp_optimiser import GPGraphOptimiser, GPGraphOptimiserParameters, \
     GraphGenerationParams
 from fedot.core.optimisers.gp_comp.operators.inheritance import GeneticSchemeTypesEnum
-from fedot.core.optimisers.gp_comp.operators.mutation import MutationStrengthEnum, single_add_mutation, \
-    single_change_mutation, single_drop_mutation, single_edge_mutation, MutationTypesEnum
+from fedot.core.optimisers.gp_comp.operators.mutation import MutationStrengthEnum, MutationTypesEnum
 from fedot.core.optimisers.gp_comp.operators.regularization import RegularizationTypesEnum
 from fedot.core.optimisers.gp_comp.param_free_gp_optimiser import GPGraphParameterFreeOptimiser
 from fedot.core.pipelines.pipeline import Pipeline
@@ -233,12 +232,7 @@ class GPComposerBuilder:
         self.set_default_composer_params()
 
     def can_be_secondary_requirement(self, operation):
-        models_repo = OperationTypesRepository()
-        data_operations_repo = OperationTypesRepository(operation_type='data_operation')
-
-        operation_name = models_repo.operation_info_by_id(operation)
-        if operation_name is None:
-            operation_name = data_operations_repo.operation_info_by_id(operation)
+        operation_name = OperationTypesRepository(operation_type='all').operation_info_by_id(operation)
         operation_tags = operation_name.tags
 
         secondary_model = True
