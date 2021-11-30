@@ -1,5 +1,4 @@
-from copy import deepcopy
-from typing import Union, List
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -12,7 +11,6 @@ from fedot.core.operations.evaluation.operation_implementations.data_operations.
     ImputationImplementation, OneHotEncodingImplementation
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.preprocessing.categorical import BinaryCategoricalPreprocessor
-
 # The allowed percent of empty samples in features.
 # Example: 30% objects in features are 'nan', then drop this feature from data.
 from fedot.preprocessing.structure import StructureExplorer
@@ -199,7 +197,7 @@ class DataPreprocessor:
         target = data.target
 
         # Find indices of nans rows
-        bool_target = np.isnan(target)
+        bool_target = pd.isna(target)
         number_nans_per_rows = bool_target.sum(axis=1)
 
         # Ids of rows which doesn't contain nans in target

@@ -1,13 +1,13 @@
 import inspect
 import os
-import seaborn as sns
 import time
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 
-from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.composer.composer import Composer
-
+from fedot.core.pipelines.pipeline import Pipeline
 
 try:
     import objgraph
@@ -65,7 +65,7 @@ class MemoryProfiler:
 
         sns.set_style("whitegrid")
 
-        ax = sns.lineplot(time_split, mem_res, linewidth=3, marker="X", markersize=8)
+        ax = sns.lineplot(x=time_split, y=mem_res, linewidth=3, marker="X", markersize=8)
         ax.axhline(mem_res[max_index], ls='--', color='red')
         ax.axvline(time_split[max_index], ls='--', color='red')
 
