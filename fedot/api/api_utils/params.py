@@ -3,9 +3,9 @@ from typing import Optional
 
 import numpy as np
 
+from fedot.api.api_utils.presets import OperationsPreset
 from fedot.core.log import default_log
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams, TaskParams
-from fedot.api.api_utils.presets import OperationsPreset
 
 
 class ApiParams:
@@ -85,7 +85,7 @@ class ApiParams:
                   'genetic_scheme': None,
                   'history_folder': None,
                   'use_stopping_criteria': True,
-                  'stopping_after_n_generation': 7}
+                  'stopping_after_n_generation': 10}
 
         if problem in ['classification', 'regression']:
             params['cv_folds'] = 3
