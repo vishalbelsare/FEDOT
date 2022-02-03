@@ -87,20 +87,21 @@ class GPComposer(Composer):
             self.log = logger
 
     def compose_pipeline(self, data: Union[InputData, MultiModalData], is_visualise: bool = False,
-                         is_tune: bool = False,
                          on_next_iteration_callback: Optional[Callable] = None) -> Union[Pipeline, List[Pipeline]]:
         """ Function for optimal pipeline structure searching
         :param data: InputData for pipeline composing
         :param is_visualise: is it needed to visualise
-        :param is_tune: is it needed to tune pipeline after composing TODO integrate new tuner
         :param on_next_iteration_callback: TODO add description
         :return best_pipeline: obtained result after composing: one pipeline for single-objective optimization;
             For the multi-objective case, the list of the graph is returned.
             In the list, the pipelines are ordered by the descending of primary metric (the first is the best)
         """
+        if not self.optimiser:
+            raise AttributeError(f'Optimiser for graph composition is not defined')
 
         self.optimiser.graph_generation_params.advisor.task = data.task
 
+        # Define rules for pipelines validation
         if data.task.task_type == TaskTypesEnum.ts_forecasting:
             self.optimiser.graph_generation_params.rules_for_constraint = ts_rules + common_rules
         else:
@@ -108,9 +109,6 @@ class GPComposer(Composer):
 
         if self.composer_requirements.max_pipeline_fit_time:
             set_multiprocess_start_method()
-
-        if not self.optimiser:
-            raise AttributeError(f'Optimiser for graph composition is not defined')
 
         # shuffle data if necessary
         data.shuffle()
@@ -140,8 +138,6 @@ class GPComposer(Composer):
 
         self.log.info('GP composition finished')
         self.cache.clear()
-        if is_tune:
-            self.tune_pipeline(best_pipeline, data, self.composer_requirements.timeout)
         return best_pipeline
 
     def _convert_opt_results_to_pipeline(self, opt_result: Union[OptGraph, List[OptGraph]]) -> Pipeline:
@@ -215,10 +211,6 @@ class GPComposer(Composer):
             self.log.info(f'Pipeline assessment warning: {ex}. Continue.')
             evaluated_metrics = None
         return evaluated_metrics
-
-    @staticmethod
-    def tune_pipeline(pipeline: Pipeline, data: InputData, time_limit):
-        raise NotImplementedError()
 
     @property
     def history(self):

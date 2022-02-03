@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 
+import warnings
+warnings.filterwarnings('ignore')
+
 from examples.simple.time_series_forecasting.ts_pipelines import *
 from fedot.api.main import Fedot
 from fedot.core.data.data import InputData
@@ -38,7 +41,9 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
     model = Fedot(problem='ts_forecasting',
                   task_params=task.task_params,
                   timeout=timeout,
-                  preset='fast_train')
+                  preset='fast_train',
+                  composer_params={'pop_size': 10},
+                  _show_developer_statistics=True)
 
     # run AutoML model design in the same way
     pipeline = model.fit(train_data)
@@ -56,4 +61,4 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
 
 
 if __name__ == '__main__':
-    run_ts_forecasting_example(dataset='stackoverflow', horizon=30, timeout=0.5)
+    run_ts_forecasting_example(dataset='beer', horizon=30, timeout=10)

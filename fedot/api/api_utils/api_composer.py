@@ -1,10 +1,12 @@
 import datetime
 import gc
+import sys
 import traceback
 from typing import Callable, List, Type, Union, Optional, Dict
 
 import numpy as np
 from deap import tools
+import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, roc_auc_score as roc_auc
 
 from fedot.api.api_utils.initial_assumptions import ApiInitialAssumptions
@@ -227,7 +229,21 @@ class ApiComposer:
         gp_composer = builder.build()
 
         api_params['logger'].message('Pipeline composition started')
+        if self._show_developer_statistics:
+            print(f'Size of gp_composer object before training: {sys.getsizeof(gp_composer)}')
         pipeline_gp_composed = gp_composer.compose_pipeline(data=api_params['train_data'])
+
+        if self._show_developer_statistics:
+            # Plot boxplots with fitness info
+            print(f'Size of gp_composer object after training: {sys.getsizeof(gp_composer)}')
+            fitness_by_generation = gp_composer.history.historical_fitness
+            short_metric_name = gp_composer.history.short_metrics_names[0]
+            plt.boxplot(fitness_by_generation)
+            plt.ylabel(f'Metric: {short_metric_name}', fontsize=13)
+            plt.xlabel('Generation', fontsize=13)
+            plt.grid()
+            plt.show()
+            pass
 
         if isinstance(pipeline_gp_composed, list):
             for pipeline in pipeline_gp_composed:
