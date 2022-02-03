@@ -59,7 +59,8 @@ class EvoGraphParameterFreeOptimiser(EvoGraphOptimiser):
 
     def optimise(self, objective_function, offspring_rate: float = 0.5,
                  on_next_iteration_callback=None,
-                 show_progress: bool = True) -> Union[OptGraph, List[OptGraph]]:
+                 show_progress: bool = True,
+                 _show_developer_statistics: bool = False) -> Union[OptGraph, List[OptGraph]]:
         if on_next_iteration_callback is None:
             on_next_iteration_callback = self.default_on_next_iteration_callback
 
@@ -72,7 +73,8 @@ class EvoGraphParameterFreeOptimiser(EvoGraphOptimiser):
             pbar = tqdm(total=self.requirements.num_of_generations,
                         desc='Generations', unit='gen', initial=1) if show_progress else None
 
-            self.population = self._evaluate_individuals(self.population, objective_function, timer=t)
+            self.population = self._evaluate_individuals(self.population, objective_function, timer=t,
+                                                         _show_developer_statistics=_show_developer_statistics)
 
             if self.archive is not None:
                 self.archive.update(self.population)

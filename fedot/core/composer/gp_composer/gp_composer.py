@@ -14,7 +14,7 @@ from fedot.core.log import Log, default_log
 from fedot.core.optimisers.gp_comp.operators.mutation import MutationStrengthEnum
 from fedot.core.optimisers.graph import OptGraph
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.validation import common_rules, ts_rules, validate
+from fedot.core.pipelines.verification import common_rules, ts_rules, do_verification
 from fedot.core.repository.quality_metrics_repository import (MetricsEnum,
                                                               MetricsRepository)
 from fedot.core.repository.tasks import TaskTypesEnum
@@ -87,7 +87,8 @@ class GPComposer(Composer):
             self.log = logger
 
     def compose_pipeline(self, data: Union[InputData, MultiModalData], is_visualise: bool = False,
-                         on_next_iteration_callback: Optional[Callable] = None) -> Union[Pipeline, List[Pipeline]]:
+                         on_next_iteration_callback: Optional[Callable] = None,
+                         _show_developer_statistics: bool = False) -> Union[Pipeline, List[Pipeline]]:
         """ Function for optimal pipeline structure searching
         :param data: InputData for pipeline composing
         :param is_visualise: is it needed to visualise
@@ -133,7 +134,8 @@ class GPComposer(Composer):
                                          clear_exiting=not self.use_existing_cache)
 
         opt_result = self.optimiser.optimise(objective_function_for_pipeline,
-                                             on_next_iteration_callback=on_next_iteration_callback)
+                                             on_next_iteration_callback=on_next_iteration_callback,
+                                             _show_developer_statistics=_show_developer_statistics)
         best_pipeline = self._convert_opt_results_to_pipeline(opt_result)
 
         self.log.info('GP composition finished')
@@ -178,7 +180,7 @@ class GPComposer(Composer):
                         test_data: Union[InputData, MultiModalData],
                         pipeline: Pipeline) -> Optional[Tuple[Any]]:
         try:
-            validate(pipeline, task=train_data.task)
+            do_verification(pipeline, task=train_data.task)
             pipeline.log = self.log
 
             if type(metrics) is not list:

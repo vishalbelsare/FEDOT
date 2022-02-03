@@ -3,7 +3,7 @@ from typing import Optional
 
 from fedot.core.optimisers.adapters import PipelineAdapter
 from fedot.core.optimisers.graph import OptGraph
-from fedot.core.pipelines.validation import validate
+from fedot.core.pipelines.verification import do_verification
 
 
 def constraint_function(graph: OptGraph,
@@ -11,7 +11,7 @@ def constraint_function(graph: OptGraph,
     try:
         rules = params.rules_for_constraint if params else None
         object_for_validation = params.adapter.restore(deepcopy(graph))
-        validate(object_for_validation, rules, params.advisor.task)
+        do_verification(object_for_validation, rules, params.advisor.task)
         return True
     except ValueError:
         return False

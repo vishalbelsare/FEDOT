@@ -113,7 +113,8 @@ def num_of_parents_in_crossover(num_of_final_inds: int) -> int:
 
 
 def evaluate_individuals(individuals_set, objective_function, graph_generation_params,
-                         is_multi_objective: bool, timer=None):
+                         is_multi_objective: bool, timer=None,
+                         _show_developer_statistics: bool = False):
     logger = default_log('individuals evaluation logger')
 
     num_of_successful_evals = 0
@@ -136,7 +137,8 @@ def evaluate_individuals(individuals_set, objective_function, graph_generation_p
         if len(pre_evaluated_objects) > 0:
             graph = pre_evaluated_objects[ind_num]
         ind.fitness = calculate_objective(graph, objective_function,
-                                          is_multi_objective, graph_generation_params)
+                                          is_multi_objective, graph_generation_params,
+                                          _show_developer_statistics)
         ind.computation_time = timeit.default_timer() - start_time
         if ind.fitness is not None:
             num_of_successful_evals += 1
@@ -151,12 +153,14 @@ def evaluate_individuals(individuals_set, objective_function, graph_generation_p
 
 def calculate_objective(graph: Union[OptGraph, Any], objective_function: Callable,
                         is_multi_objective: bool,
-                        graph_generation_params) -> Any:
+                        graph_generation_params,
+                        _show_developer_statistics: bool = False) -> Any:
     if isinstance(graph, OptGraph):
         converted_object = graph_generation_params.adapter.restore(graph)
     else:
         converted_object = graph
-    calculated_fitness = objective_function(converted_object)
+    calculated_fitness = objective_function(converted_object,
+                                            _show_developer_statistics=_show_developer_statistics)
     if calculated_fitness is None:
         return None
     else:

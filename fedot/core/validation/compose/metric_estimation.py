@@ -8,7 +8,8 @@ from fedot.core.repository.quality_metrics_repository import MetricsRepository
 def metric_evaluation(pipeline, train_data: InputData, test_data: InputData,
                       metrics: list, evaluated_metrics: list,
                       fold_id: int = None, vb_number: int = None,
-                      cache: OperationsCache = None):
+                      cache: OperationsCache = None,
+                      _show_developer_statistics: bool = False):
     """ Pipeline training and metrics assessment
 
     :param pipeline: pipeline for validation
@@ -30,7 +31,8 @@ def metric_evaluation(pipeline, train_data: InputData, test_data: InputData,
             metric_func = metric
         else:
             metric_func = MetricsRepository().metric_by_id(metric)
-        metric_value = metric_func(pipeline, reference_data=test_data, validation_blocks=vb_number)
+        metric_value = metric_func(pipeline, reference_data=test_data, validation_blocks=vb_number,
+                                   _show_developer_statistics=_show_developer_statistics)
         evaluated_metrics[index].extend([metric_value])
 
     if cache is not None:

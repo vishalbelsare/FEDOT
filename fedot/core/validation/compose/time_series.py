@@ -14,7 +14,8 @@ def ts_metric_calculation(reference_data: Union[InputData, List[Tuple[InputData,
                           metrics: [str, Callable] = None,
                           pipeline=None,
                           cache: Optional[OperationsCache] = None,
-                          log=None) -> [Tuple[float, ...], None]:
+                          log=None,
+                          _show_developer_statistics: bool = False) -> [Tuple[float, ...], None]:
     """ Determine metric value for time series forecasting pipeline based
     on data for validation
 
@@ -37,7 +38,8 @@ def ts_metric_calculation(reference_data: Union[InputData, List[Tuple[InputData,
                                                   test_data=test_data, metrics=metrics,
                                                   evaluated_metrics=evaluated_metrics,
                                                   vb_number=validation_blocks_number,
-                                                  fold_id=fold_id, cache=cache)
+                                                  fold_id=fold_id, cache=cache,
+                                                  _show_developer_statistics=_show_developer_statistics)
             fold_id += 1
         evaluated_metrics = tuple(map(lambda x: np.mean(x), evaluated_metrics))
         log.debug(f'Pipeline {pipeline.root_node.descriptive_id} with metrics: {list(evaluated_metrics)}')

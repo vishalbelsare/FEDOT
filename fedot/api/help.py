@@ -17,7 +17,7 @@ def print_models_info(task_name):
     repository_operations_list = _filter_operations_by_type(repository, task)
     for model in repository_operations_list:
         if model.id != 'custom':
-            hyperparameters = SearchSpace().get_operation_parameter_range(str(model.id))
+            hyperparameters, was_nested = SearchSpace().get_operation_parameter_range(str(model.id))
             implementation_info = model.current_strategy(task)(model.id).implementation_info
             print(f"Model name - '{model.id}'")
             print(f"Available hyperparameters to optimize with tuner - {hyperparameters}")
@@ -37,7 +37,7 @@ def print_data_operations_info(task_name):
     # Filter operations
     repository_operations_list = _filter_operations_by_type(repository, task)
     for operation in repository_operations_list:
-        hyperparameters = SearchSpace().get_operation_parameter_range(str(operation.id))
+        hyperparameters, was_nested = SearchSpace().get_operation_parameter_range(str(operation.id))
         implementation_info = operation.current_strategy(task)(operation.id).implementation_info
         print(f"Data operation name - '{operation.id}'")
         print(f"Available hyperparameters to optimize with tuner - {hyperparameters}")

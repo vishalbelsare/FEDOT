@@ -399,11 +399,13 @@ class EvoGraphOptimiser(GraphOptimiser):
             best = self.archive.items
         return best
 
-    def _evaluate_individuals(self, individuals_set, objective_function, timer=None):
+    def _evaluate_individuals(self, individuals_set, objective_function, timer=None,
+                              _show_developer_statistics: bool = False):
         evaluated_individuals = evaluate_individuals(individuals_set=individuals_set,
                                                      objective_function=objective_function,
                                                      graph_generation_params=self.graph_generation_params,
-                                                     timer=timer, is_multi_objective=self.parameters.multi_objective)
+                                                     timer=timer, is_multi_objective=self.parameters.multi_objective,
+                                                     _show_developer_statistics=_show_developer_statistics)
         individuals_set = correct_if_has_nans(evaluated_individuals, self.log)
         return individuals_set
 

@@ -12,7 +12,8 @@ from fedot.core.validation.split import tabular_cv_generator
 def table_metric_calculation(reference_data: InputData, cv_folds: int,
                              metrics: [str, Callable], pipeline: Optional[Pipeline],
                              cache: Optional[OperationsCache] = None,
-                             log=None) -> [Tuple[float, ...], None]:
+                             log=None,
+                             _show_developer_statistics: bool = False) -> [Tuple[float, ...], None]:
     """ Perform cross validation on tabular data for regression and classification tasks
 
     :param reference_data: InputData for validation

@@ -65,15 +65,15 @@ class CuMLEvaluationStrategy(SkLearnEvaluationStrategy):
             operation_implementation = self.operation_impl()
 
         # If model doesn't support multi-output and current task is ts_forecasting
-        current_task = train_data.task.task_type
+        current_task_type = train_data.task.task_type
         models_repo = OperationTypesRepository()
-        non_multi_models, _ = models_repo.suitable_operation(task_type=current_task,
+        non_multi_models, _ = models_repo.suitable_operation(task_type=current_task_type,
                                                              tags=['non_multi'])
         is_model_not_support_multi = self.operation_type in non_multi_models
         features = cudf.DataFrame(train_data.features.astype('float32'))
         target = cudf.Series(train_data.target.flatten().astype('float32'))
 
-        if is_model_not_support_multi and current_task == TaskTypesEnum.ts_forecasting:
+        if is_model_not_support_multi and current_task_type == TaskTypesEnum.ts_forecasting:
             raise NotImplementedError('Not supported for GPU yet')
             # TODO Manually wrap the regressor into multi-output model
         else:

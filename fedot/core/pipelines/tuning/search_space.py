@@ -13,7 +13,8 @@ class SearchSpace:
 
     def __init__(self,
                  custom_search_space: dict = None,
-                 replace_default_search_space: bool = False):
+                 replace_default_search_space: bool = False,
+                 search_in_nested_space: bool = False):
         self.custom_search_space = custom_search_space
         self.replace_default_search_space = replace_default_search_space
         self.parameters_per_operation = self.get_parameters_dict()
@@ -309,17 +310,23 @@ class SearchSpace:
 
         :return : dictionary with appropriate range
         """
-
+        was_nested = False
         # Get available parameters for current operation
         operation_parameters = self.parameters_per_operation.get(operation_name)
 
         if operation_parameters is not None:
+            if 'nested_space' in operation_parameters.keys():
+                main_tuple = operation_parameters.get('nested_space')[1]
+                first_nested_space = main_tuple[0][0]
+                was_nested = True
+                return list(first_nested_space.keys()), was_nested
+
             # If there are not parameter_name - return list with all parameters
             if parameter_name is None:
-                return list(operation_parameters.keys())
+                return list(operation_parameters.keys()), was_nested
             else:
                 hyperopt_tuple = operation_parameters.get(parameter_name)
-                return hyperopt_tuple[0](label, *hyperopt_tuple[1])
+                return hyperopt_tuple[0](label, *hyperopt_tuple[1]), was_nested
         else:
             return None
 
@@ -336,7 +343,7 @@ class SearchSpace:
         """
 
         # Get available parameters for operation
-        params_list = self.get_operation_parameter_range(operation_name)
+        params_list, was_nested = self.get_operation_parameter_range(operation_name)
 
         if params_list is None:
             params_dict = None
@@ -350,9 +357,9 @@ class SearchSpace:
                 node_op_parameter_name = ''.join((str(node_id), ' || ', op_parameter_name))
 
                 # For operation get range where search can be done
-                space = self.get_operation_parameter_range(operation_name=operation_name,
-                                                           parameter_name=parameter_name,
-                                                           label=node_op_parameter_name)
+                space, was_nested = self.get_operation_parameter_range(operation_name=operation_name,
+                                                                       parameter_name=parameter_name,
+                                                                       label=node_op_parameter_name)
 
                 params_dict.update({node_op_parameter_name: space})
 

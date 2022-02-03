@@ -72,7 +72,8 @@ class Composer(ABC):
 
     @abstractmethod
     def compose_pipeline(self, data: InputData,
-                         is_visualise: bool = False) -> Pipeline:
+                         is_visualise: bool = False,
+                         _show_developer_statistics: bool = False) -> Pipeline:
         """
         Base method to run the composition process
 

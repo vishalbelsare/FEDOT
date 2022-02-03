@@ -7,7 +7,7 @@ import numpy as np
 from fedot.core.data.data import InputData
 from fedot.core.log import default_log
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.validation import validate
+from fedot.core.pipelines.verification import do_verification
 from fedot.remote.infrastructure.clients.client import Client
 
 
@@ -83,7 +83,7 @@ class RemoteEvaluator:
         for pipelines_part in pipelines_parts:
             for pipeline in pipelines_part:
                 try:
-                    validate(pipeline)
+                    do_verification(pipeline)
                 except ValueError:
                     pipeline.execution_id = None
                     continue

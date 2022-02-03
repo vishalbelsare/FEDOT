@@ -90,7 +90,7 @@ class ApiDataProcessor:
     def correct_predictions(self, metric_name: str,
                             real: InputData, prediction: OutputData):
         """ Change shape for models predictions if its necessary. Apply """
-        if self.task == TaskTypesEnum.ts_forecasting:
+        if self.task.task_type == TaskTypesEnum.ts_forecasting:
             real.target = real.target[~np.isnan(prediction.predict)]
             prediction.predict = prediction.predict[~np.isnan(prediction.predict)]
 

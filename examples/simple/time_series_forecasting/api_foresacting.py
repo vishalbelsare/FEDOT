@@ -42,7 +42,7 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
                   task_params=task.task_params,
                   timeout=timeout,
                   preset='fast_train',
-                  composer_params={'pop_size': 10},
+                  composer_params={'pop_size': 10, 'initial_assumption': Pipeline(PrimaryNode('glm'))},
                   _show_developer_statistics=True)
 
     # run AutoML model design in the same way

@@ -9,6 +9,7 @@ from fedot.core.data.data import InputData, OutputData
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TaskTypesEnum
 from fedot.core.pipelines.ts_wrappers import in_sample_ts_forecast
+import matplotlib.pyplot as plt
 
 
 def from_maximised_metric(metric_func):
@@ -42,7 +43,7 @@ class QualityMetric:
 
     @classmethod
     def get_value(cls, pipeline: 'Pipeline', reference_data: InputData,
-                  validation_blocks: int = None) -> float:
+                  validation_blocks: int = None, _show_developer_statistics: bool = False) -> float:
         metric = cls.default_value
         try:
             if validation_blocks is None:
@@ -50,8 +51,11 @@ class QualityMetric:
                 results, reference_data = cls._simple_prediction(pipeline, reference_data)
             else:
                 # Perform time series in-sample validation
-                reference_data, results = cls._in_sample_prediction(pipeline, reference_data, validation_blocks)
+                reference_data, results = cls._in_sample_prediction(pipeline, reference_data, validation_blocks,
+                                                                    _show_developer_statistics=_show_developer_statistics)
             metric = cls.metric(reference_data, results)
+            if _show_developer_statistics:
+                print(f'Calculated metric: {metric}')
         except Exception as ex:
             print(f'Metric evaluation error: {ex}')
         return metric
@@ -102,7 +106,7 @@ class QualityMetric:
         return metric_with_penalty
 
     @staticmethod
-    def _in_sample_prediction(pipeline, data, validation_blocks):
+    def _in_sample_prediction(pipeline, data, validation_blocks, _show_developer_statistics: bool = False):
         """ Performs in-sample pipeline validation for time series prediction """
 
         # Get number of validation blocks per each fold
@@ -121,6 +125,26 @@ class QualityMetric:
                              data_type=DataTypesEnum.ts)
         reference_data = InputData(idx=np.arange(0, len(actual_values)), features=actual_values,
                                    task=data.task, target=actual_values, data_type=DataTypesEnum.ts)
+
+        if _show_developer_statistics:
+            # Display validation parts of time series
+            start_forecast_id = len(data.target[:-horizon])
+            plt.plot(data.idx, data.target, label='Actual values')
+            plt.plot(np.arange(start_forecast_id, start_forecast_id + len(predicted_values)),
+                     predicted_values, label='Forecast')
+            min_value = min(data.target)
+            max_value = max(data.target)
+
+            current_border = start_forecast_id
+            for i in range(validation_blocks):
+                # Plot validation blocks borders
+                plt.plot([current_border, current_border], [min_value, max_value],
+                         c='black')
+                current_border += data.task.task_params.forecast_length
+            plt.legend()
+            plt.title(str(pipeline.nodes))
+            plt.grid()
+            plt.show()
 
         return reference_data, results
 

@@ -23,10 +23,13 @@ class ParametersChanger:
         """ Function return a dictionary with new parameters values """
 
         # Get available parameters for operation
-        params_list = SearchSpace().get_operation_parameter_range(self.operation_name)
+        params_list, was_nested = SearchSpace().get_operation_parameter_range(self.operation_name)
 
         if params_list is None:
             params_dict = None
+        elif was_nested:
+            # Take values for nested space
+            params_dict = self.new_params_dict_for_nested_space()
         else:
             # Get new values for all parameters
             params_dict = self.new_params_dict(params_list)
@@ -65,6 +68,15 @@ class ParametersChanger:
 
         return params_dict
 
+    def new_params_dict_for_nested_space(self):
+        """ Generate new parameters for nested space operations (different tracks are available) """
+        main_space = SearchSpace().parameters_per_operation[self.operation_name]
+        available_tracks = main_space['nested_space'][1][0]
+        random_track = random.randint(0, len(available_tracks) - 1)
+
+        new_values = hp_sample(available_tracks[random_track])
+        return new_values
+
     def _get_current_parameter_value(self, parameter_name):
 
         if isinstance(self.current_params, str):
@@ -84,9 +96,9 @@ class ParametersChanger:
     def _random_change(parameter_name, **kwargs):
         """ Randomly selects a parameter value from a specified range """
 
-        space = SearchSpace().get_operation_parameter_range(operation_name=kwargs['operation_name'],
-                                                            parameter_name=parameter_name,
-                                                            label=parameter_name)
+        space, was_nested = SearchSpace().get_operation_parameter_range(operation_name=kwargs['operation_name'],
+                                                                        parameter_name=parameter_name,
+                                                                        label=parameter_name)
         # Randomly choose new value
         new_value = hp_sample(space)
         return {parameter_name: new_value}

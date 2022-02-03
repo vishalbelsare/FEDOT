@@ -335,9 +335,9 @@ def test_search_space_get_operation_parameter_range():
     custom_search_space_with_replace = SearchSpace(custom_search_space=custom_search_space,
                                                    replace_default_search_space=True)
 
-    default_operations = default_search_space.get_operation_parameter_range('gbr')
-    custom_without_replace_operations = custom_search_space_without_replace.get_operation_parameter_range('gbr')
-    custom_with_replace_operations = custom_search_space_with_replace.get_operation_parameter_range('gbr')
+    default_operations, was_nested = default_search_space.get_operation_parameter_range('gbr')
+    custom_without_replace_operations, was_nested = custom_search_space_without_replace.get_operation_parameter_range('gbr')
+    custom_with_replace_operations, was_nested = custom_search_space_with_replace.get_operation_parameter_range('gbr')
 
     assert default_operations == gbr_operations
     assert custom_without_replace_operations == gbr_operations

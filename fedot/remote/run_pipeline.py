@@ -7,7 +7,7 @@ from fedot.core.data.data import InputData
 from fedot.core.data.multi_modal import MultiModalData
 from fedot.core.log import default_log
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.validation import validate
+from fedot.core.pipelines.verification import do_verification
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TaskTypesEnum
 from fedot.remote.pipeline_run_config import PipelineRunConfig
@@ -58,7 +58,7 @@ def fit_pipeline(config_file: Union[str, bytes]) -> bool:
         train_data = train_data.subset_indices(config.train_data_idx)
 
     try:
-        validate(pipeline, task=config.task)
+        do_verification(pipeline, task=config.task)
     except ValueError:
         logger.error('Pipeline not valid')
         return False
