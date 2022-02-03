@@ -13,8 +13,7 @@ class SearchSpace:
 
     def __init__(self,
                  custom_search_space: dict = None,
-                 replace_default_search_space: bool = False,
-                 search_in_nested_space: bool = False):
+                 replace_default_search_space: bool = False):
         self.custom_search_space = custom_search_space
         self.replace_default_search_space = replace_default_search_space
         self.parameters_per_operation = self.get_parameters_dict()
@@ -316,10 +315,8 @@ class SearchSpace:
 
         if operation_parameters is not None:
             if 'nested_space' in operation_parameters.keys():
-                main_tuple = operation_parameters.get('nested_space')[1]
-                first_nested_space = main_tuple[0][0]
                 was_nested = True
-                return list(first_nested_space.keys()), was_nested
+                return ['nested_space'], was_nested
 
             # If there are not parameter_name - return list with all parameters
             if parameter_name is None:
