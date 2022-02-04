@@ -230,13 +230,13 @@ class ApiComposer:
 
         api_params['logger'].message('Pipeline composition started')
         if self._show_developer_statistics:
-            print(f'Size of gp_composer object before training: {sys.getsizeof(gp_composer)}')
+            print(f'Size of gp_composer object before training: {sys.getsizeof(gp_composer.optimiser.history)}')
         pipeline_gp_composed = gp_composer.compose_pipeline(data=api_params['train_data'],
                                                             _show_developer_statistics=self._show_developer_statistics)
 
         if self._show_developer_statistics:
             # Plot boxplots with fitness info
-            print(f'Size of gp_composer object after training: {sys.getsizeof(gp_composer)}')
+            print(f'Size of gp_composer object after training: {sys.getsizeof(gp_composer.optimiser.history)}')
             fitness_by_generation = gp_composer.history.historical_fitness
             short_metric_name = gp_composer.history.short_metrics_names[0]
             plt.boxplot(fitness_by_generation)

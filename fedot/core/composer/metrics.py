@@ -128,23 +128,24 @@ class QualityMetric:
 
         if _show_developer_statistics:
             # Display validation parts of time series
-            start_forecast_id = len(data.target[:-horizon])
-            plt.plot(data.idx, data.target, label='Actual values')
-            plt.plot(np.arange(start_forecast_id, start_forecast_id + len(predicted_values)),
-                     predicted_values, label='Forecast')
-            min_value = min(data.target)
-            max_value = max(data.target)
-
-            current_border = start_forecast_id
-            for i in range(validation_blocks):
-                # Plot validation blocks borders
-                plt.plot([current_border, current_border], [min_value, max_value],
-                         c='black')
-                current_border += data.task.task_params.forecast_length
-            plt.legend()
-            plt.title(str(pipeline.nodes))
-            plt.grid()
-            plt.show()
+            # start_forecast_id = len(data.target[:-horizon])
+            # plt.plot(data.idx, data.target, label='Actual values')
+            # plt.plot(np.arange(start_forecast_id, start_forecast_id + len(predicted_values)),
+            #          predicted_values, label='Forecast')
+            # min_value = min(data.target)
+            # max_value = max(data.target)
+            #
+            # current_border = start_forecast_id
+            # for i in range(validation_blocks):
+            #     # Plot validation blocks borders
+            #     plt.plot([current_border, current_border], [min_value, max_value],
+            #              c='black')
+            #     current_border += data.task.task_params.forecast_length
+            # plt.legend()
+            # plt.title(str(pipeline.nodes))
+            # plt.grid()
+            # plt.show()
+            pass
 
         return reference_data, results
 

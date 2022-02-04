@@ -325,7 +325,7 @@ class SearchSpace:
                 hyperopt_tuple = operation_parameters.get(parameter_name)
                 return hyperopt_tuple[0](label, *hyperopt_tuple[1]), was_nested
         else:
-            return None
+            return None, was_nested
 
     def get_node_params(self, node_id, operation_name):
         """

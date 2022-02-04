@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -11,6 +13,8 @@ from fedot.core.data.data_split import train_test_data_setup
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TsForecastingParams, Task, TaskTypesEnum
 from fedot.core.utils import fedot_project_root
+from fedot.utilities.profiler.memory_profiler import MemoryProfiler
+from fedot.utilities.profiler.time_profiler import TimeProfiler
 
 datasets = {
     'australia': f'{fedot_project_root()}/examples/data/ts/australia.csv',
@@ -42,7 +46,8 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
                   task_params=task.task_params,
                   timeout=timeout,
                   preset='fast_train',
-                  composer_params={'pop_size': 10, 'initial_assumption': Pipeline(PrimaryNode('glm'))},
+                  composer_params={'pop_size': 10},
+                  verbose_level=4,
                   _show_developer_statistics=True)
 
     # run AutoML model design in the same way
@@ -61,4 +66,11 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
 
 
 if __name__ == '__main__':
-    run_ts_forecasting_example(dataset='beer', horizon=30, timeout=10)
+    # path = os.path.join(os.path.expanduser("~"), 'memory_profiler')
+    # arguments = {'dataset': 'beer',
+    #              'horizon': 30,
+    #              'timeout': 0.5}
+    # MemoryProfiler(run_ts_forecasting_example, kwargs=arguments, path=path,
+    #                roots=[run_ts_forecasting_example], max_depth=8)
+
+    run_ts_forecasting_example(dataset='beer', horizon=30, timeout=1)
