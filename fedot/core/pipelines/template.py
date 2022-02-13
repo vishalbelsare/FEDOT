@@ -37,6 +37,7 @@ class PipelineTemplate:
     """
 
     def __init__(self, pipeline: 'Pipeline' = None, log: Log = None):
+        self.pipeline = pipeline
         self.total_pipeline_operations = Counter()
         self.operation_templates: List[OperationTemplate] = []
         if pipeline is not None:

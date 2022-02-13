@@ -238,12 +238,29 @@ class ApiComposer:
             # Plot boxplots with fitness info
             print(f'Size of gp_composer object after training: {sys.getsizeof(gp_composer.optimiser.history)}')
             fitness_by_generation = gp_composer.history.historical_fitness
+            pipelines_by_generation = gp_composer.optimiser.history.archive_history
+
+            # Take best individuals per generation
+            best_pipeline_per_generation = []
+            for generation in pipelines_by_generation:
+                fitness_list = []
+                for individual in generation:
+                    fitness_list.append(individual.fitness)
+                fitness_list = np.array(fitness_list)
+                min_id = np.argmin(fitness_list)
+                best_pipeline_per_generation.append(generation[min_id])
+
             short_metric_name = gp_composer.history.short_metrics_names[0]
+
             plt.boxplot(fitness_by_generation)
             plt.ylabel(f'Metric: {short_metric_name}', fontsize=13)
             plt.xlabel('Generation', fontsize=13)
             plt.grid()
             plt.show()
+
+            best_pipeline_per_generation[0].graph.show()
+            best_pipeline_per_generation[5].graph.show()
+            best_pipeline_per_generation[-1].graph.show()
             pass
 
         if isinstance(pipeline_gp_composed, list):

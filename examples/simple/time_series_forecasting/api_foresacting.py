@@ -73,4 +73,4 @@ if __name__ == '__main__':
     # MemoryProfiler(run_ts_forecasting_example, kwargs=arguments, path=path,
     #                roots=[run_ts_forecasting_example], max_depth=8)
 
-    run_ts_forecasting_example(dataset='beer', horizon=30, timeout=1)
+    run_ts_forecasting_example(dataset='beer', horizon=30, timeout=10)
