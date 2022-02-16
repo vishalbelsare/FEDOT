@@ -184,14 +184,14 @@ class GPComposer(Composer):
             if type(metrics) is not list:
                 metrics = [metrics]
 
-            if self.cache is not None:
+            if self.cache is not None and not isinstance(metrics[0], Callable):
                 # TODO improve cache
                 pipeline.fit_from_cache(self.cache)
 
             self.log.debug(f'Pipeline {pipeline.root_node.descriptive_id} fit started')
 
-            pipeline.fit(input_data=train_data,
-                         time_constraint=self.composer_requirements.max_pipeline_fit_time)
+            # pipeline.fit(input_data=train_data,
+            #             time_constraint=self.composer_requirements.max_pipeline_fit_time)
             try:
                 self.cache.save_pipeline(pipeline)
             except Exception as ex:

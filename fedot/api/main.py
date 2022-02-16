@@ -1,24 +1,21 @@
 from copy import deepcopy
-from datetime import timedelta
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
+from fedot.api.api_utils.api_composer import ApiComposer, fit_and_check_correctness
+from fedot.api.api_utils.api_data import ApiDataProcessor
 from fedot.api.api_utils.api_data_analyser import DataAnalyser
-from fedot.api.api_utils.initial_assumptions import preprocessing_builder
+from fedot.api.api_utils.metrics import ApiMetrics
+from fedot.api.api_utils.params import ApiParams
 from fedot.core.data.data import InputData, OutputData
-from fedot.core.data.data_preprocessing import data_has_categorical_features, data_has_missing_values
 from fedot.core.data.multi_modal import MultiModalData
 from fedot.core.data.visualisation import plot_biplot, plot_roc_auc, plot_forecast
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PrimaryNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.quality_metrics_repository import MetricsRepository
 from fedot.core.repository.tasks import TaskParams, TaskTypesEnum
-from fedot.api.api_utils.params import ApiParams
-from fedot.api.api_utils.api_data import ApiDataProcessor
-from fedot.api.api_utils.metrics import ApiMetrics
-from fedot.api.api_utils.api_composer import ApiComposer, fit_and_check_correctness
 from fedot.explainability.explainers import explain_pipeline
 from fedot.preprocessing.preprocessing import merge_preprocessors
 from fedot.remote.remote_evaluator import RemoteEvaluator
@@ -59,7 +56,7 @@ class Fedot:
                 - None or -1 means infinite time
             'available_operations' - list of model names to use
             'with_tuning' - allow hyperparameters tuning for the model
-            'cv_folds' - number of folds for cross-validation
+            'cv_folds' - number of folds for cross-validation. None if CV is not used.
             'validation_blocks' - number of validation blocks for time series forecasting
             'initial_assumption' - initial assumption for composer
             'genetic_scheme' - name of the genetic scheme

@@ -3,8 +3,8 @@ import pytest
 from fedot.api.main import Fedot
 from fedot.core.optimisers.opt_history import OptHistory
 from fedot.core.repository.tasks import TsForecastingParams
-from .test_main_api import get_dataset
 from .dataclasses.api_params_dataclasses import TimeoutParams
+from .test_main_api import get_dataset
 
 TIMEOUT_CASES = [
     TimeoutParams(
@@ -30,6 +30,10 @@ TIMEOUT_CASES = [
 ]
 
 
+def custom_metric(pipeline, *args, **kwargs):
+    return float(pipeline.depth)
+
+
 @pytest.mark.parametrize('case', TIMEOUT_CASES)
 def test_timeout(case: TimeoutParams):
     composer_params = {
@@ -38,10 +42,12 @@ def test_timeout(case: TimeoutParams):
         'pop_size': 1,
         'with_tuning': False,
         'validation_blocks': 1,
+        'metric': custom_metric,
+        'cv_folds': None,
         **case.test_input
     }
 
-    task_type = 'ts_forecasting'
+    task_type = 'classification'
     preset = 'fast_train'
     fedot_input = {'problem': task_type, 'seed': 42, 'preset': preset, 'verbose_level': 4,
                    'timeout': composer_params['timeout'],
