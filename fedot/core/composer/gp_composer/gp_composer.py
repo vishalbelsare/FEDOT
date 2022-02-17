@@ -93,6 +93,7 @@ class GPComposer(Composer):
         :param data: InputData for pipeline composing
         :param is_visualise: is it needed to visualise
         :param on_next_iteration_callback: TODO add description
+        :param _show_developer_statistics: is there a need to display statistics and plot graphs
         :return best_pipeline: obtained result after composing: one pipeline for single-objective optimization;
             For the multi-objective case, the list of the graph is returned.
             In the list, the pipelines are ordered by the descending of primary metric (the first is the best)

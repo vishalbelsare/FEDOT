@@ -3,6 +3,7 @@ import gc
 import sys
 import traceback
 from typing import Callable, List, Type, Union, Optional, Dict
+from pympler import asizeof
 
 import numpy as np
 from deap import tools
@@ -230,13 +231,15 @@ class ApiComposer:
 
         api_params['logger'].message('Pipeline composition started')
         if self._show_developer_statistics:
-            print(f'Size of gp_composer object before training: {sys.getsizeof(gp_composer.optimiser.history)}')
+            mg_size = asizeof.asizeof(gp_composer.optimiser.history) * 1e-6
+            print(f'Size of gp_composer object before training Mbyte: {mg_size}')
         pipeline_gp_composed = gp_composer.compose_pipeline(data=api_params['train_data'],
                                                             _show_developer_statistics=self._show_developer_statistics)
 
         if self._show_developer_statistics:
             # Plot boxplots with fitness info
-            print(f'Size of gp_composer object after training: {sys.getsizeof(gp_composer.optimiser.history)}')
+            mg_size = asizeof.asizeof(gp_composer.optimiser.history) * 1e-6
+            print(f'Size of gp_composer object after training Mbyte: {mg_size}')
             fitness_by_generation = gp_composer.history.historical_fitness
             pipelines_by_generation = gp_composer.optimiser.history.archive_history
 
@@ -258,15 +261,10 @@ class ApiComposer:
             plt.grid()
             plt.show()
 
-            best_pipeline_per_generation[0].graph.show()
-            best_pipeline_per_generation[5].graph.show()
-            best_pipeline_per_generation[-1].graph.show()
-            pass
-
         if isinstance(pipeline_gp_composed, list):
             for pipeline in pipeline_gp_composed:
                 pipeline.log = api_params['logger']
-            pipeline_for_return = pipeline_gp_composed[0]
+            pipeline_gp_composed = pipeline_gp_composed[0]
             best_candidates = gp_composer.optimiser.archive
         else:
             best_candidates = [pipeline_gp_composed]
@@ -275,7 +273,7 @@ class ApiComposer:
         spending_time_for_composing = datetime.datetime.now() - starting_time_for_composing
 
         if tuning_params['with_tuning']:
-            pipeline_gp_composed = self.perform_hyperparameters_tuning(self, api_params, tuning_params,
+            pipeline_gp_composed = self.perform_hyperparameters_tuning(api_params, tuning_params,
                                                                        spending_time_for_composing,
                                                                        timeout_for_composing,
                                                                        composer_requirements,

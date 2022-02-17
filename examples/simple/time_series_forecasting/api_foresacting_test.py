@@ -48,7 +48,7 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
                   preset='fast_train',
                   composer_params={'pop_size': 10},
                   verbose_level=4,
-                  _show_developer_statistics=False)
+                  _show_developer_statistics=True)
 
     # run AutoML model design in the same way
     pipeline = model.fit(train_data)
@@ -66,11 +66,4 @@ def run_ts_forecasting_example(dataset='australia', horizon: int = 30, timeout: 
 
 
 if __name__ == '__main__':
-    path = os.path.join(os.path.expanduser("~"), 'memory_profiler')
-    arguments = {'dataset': 'beer',
-                 'horizon': 30,
-                 'timeout': 15}
-    MemoryProfiler(run_ts_forecasting_example, kwargs=arguments, path=path,
-                   roots=[run_ts_forecasting_example], max_depth=8)
-
-    # run_ts_forecasting_example(dataset='beer', horizon=30, timeout=10)
+    run_ts_forecasting_example(dataset='beer', horizon=30, timeout=1)
