@@ -215,7 +215,10 @@ class Node(GraphNode):
             return []
 
         info = OperationTypesRepository(operation_type='all').operation_info_by_id(self.operation.operation_type)
-        if info is not None:
+        if info is None:
+            # There are no tags for current operation
+            return []
+        else:
             return info.tags
 
 

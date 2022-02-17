@@ -70,6 +70,7 @@ class Fedot:
     :param safe_mode: if set True it will cut large datasets to prevent memory overflow and use label encoder
     instead of oneHot encoder if summary cardinality of categorical features is high.
     :param initial_assumption: initial assumption for composer
+    :param _show_developer_statistics: is there a need to show statistics about composer launches
     """
 
     def __init__(self,
@@ -80,7 +81,8 @@ class Fedot:
                  task_params: TaskParams = None,
                  seed=None, verbose_level: int = 0,
                  safe_mode=True,
-                 initial_assumption: Union[Pipeline, List[Pipeline]] = None
+                 initial_assumption: Union[Pipeline, List[Pipeline]] = None,
+                 _show_developer_statistics: bool = False
                  ):
 
         # Classes for dealing with metrics, data sources and hyperparameters
@@ -114,6 +116,7 @@ class Fedot:
         self.history = None
         self.test_data = None
         self.prediction = None
+        self.api_composer._show_developer_statistics = _show_developer_statistics
 
     def fit(self,
             features: Union[str, np.ndarray, pd.DataFrame, InputData, dict],

@@ -39,6 +39,7 @@ class ApiComposer:
         self.current_model = None
         self.best_models = None
         self.history = None
+        self._show_developer_statistics = False
 
     def obtain_metric(self, task: Task, composer_metric: Union[str, Callable]):
         # the choice of the metric for the pipeline quality assessment during composition
@@ -231,7 +232,7 @@ class ApiComposer:
         if isinstance(pipeline_gp_composed, list):
             for pipeline in pipeline_gp_composed:
                 pipeline.log = api_params['logger']
-            pipeline_gp_composed = pipeline_gp_composed[0]
+            pipeline_for_return = pipeline_gp_composed[0]
             best_candidates = gp_composer.optimiser.archive
         else:
             best_candidates = [pipeline_gp_composed]
@@ -240,39 +241,11 @@ class ApiComposer:
         spending_time_for_composing = datetime.datetime.now() - starting_time_for_composing
 
         if tuning_params['with_tuning']:
-            if tuning_params['tuner_metric'] is None:
-                # Default metric for tuner
-                tune_metrics = TunerMetricByTask(api_params['task'].task_type)
-                tuner_loss, loss_params = tune_metrics.get_metric_and_params(api_params['train_data'])
-                api_params['logger'].message(f'Tuner metric is None, '
-                                             f'{tuner_loss.__name__} was set as default')
-            else:
-                # Get metric and parameters by name
-                tuner_loss, loss_params = self.tuner_metric_by_name(metric_name=tuning_params['tuner_metric'],
-                                                                    train_data=api_params['train_data'],
-                                                                    task=api_params['task'])
-
-            iterations = 20 if api_params['timeout'] is None else 1000
-            timeout_in_sec = datetime.timedelta(minutes=api_params['timeout']).total_seconds()
-            timeout_for_tuning = timeout_in_sec - spending_time_for_composing.total_seconds()
-
-            if timeout_for_tuning < 15:
-                api_params['logger'].info(f'Time for pipeline composing  was {str(spending_time_for_composing)}.'
-                                          f'The remaining {timeout_for_tuning} seconds are not enough '
-                                          f'to tune the hyperparameters.'
-                                          f'Composed pipeline will be returned without tuning hyperparameters.')
-            else:
-                # Tune all nodes in the pipeline
-                api_params['logger'].message('Hyperparameters tuning started')
-                vb_number = composer_requirements.validation_blocks
-                folds = composer_requirements.cv_folds
-                pipeline_gp_composed = pipeline_gp_composed.fine_tune_all_nodes(loss_function=tuner_loss,
-                                                                                loss_params=loss_params,
-                                                                                input_data=api_params['train_data'],
-                                                                                iterations=iterations,
-                                                                                timeout=round(timeout_for_tuning / 60),
-                                                                                cv_folds=folds,
-                                                                                validation_blocks=vb_number)
+            pipeline_gp_composed = self.perform_hyperparameters_tuning(self, api_params, tuning_params,
+                                                                       spending_time_for_composing,
+                                                                       timeout_for_composing,
+                                                                       composer_requirements,
+                                                                       pipeline_gp_composed)
 
         api_params['logger'].message('Model composition finished')
 
@@ -314,6 +287,44 @@ class ApiComposer:
             raise ValueError(f'Incorrect tuner metric {loss_function}')
 
         return loss_function, loss_params
+
+    def perform_hyperparameters_tuning(self, api_params, tuning_params, spending_time_for_composing,
+                                       timeout_for_composing, composer_requirements, pipeline_gp_composed):
+        """ Launch hyperparameters tuning for obtained pipeline """
+        if tuning_params['tuner_metric'] is None:
+            # Default metric for tuner
+            tune_metrics = TunerMetricByTask(api_params['task'].task_type)
+            tuner_loss, loss_params = tune_metrics.get_metric_and_params(api_params['train_data'])
+            api_params['logger'].message(f'Tuner metric is None, '
+                                         f'{tuner_loss.__name__} was set as default')
+        else:
+            # Get metric and parameters by name
+            tuner_loss, loss_params = self.tuner_metric_by_name(metric_name=tuning_params['tuner_metric'],
+                                                                train_data=api_params['train_data'],
+                                                                task=api_params['task'])
+
+        iterations = 20 if api_params['timeout'] is None else 1000
+        timeout_in_sec = datetime.timedelta(minutes=api_params['timeout']).total_seconds()
+        timeout_for_tuning = timeout_in_sec - spending_time_for_composing.total_seconds()
+
+        if timeout_for_tuning < 15:
+            api_params['logger'].info(f'Time for pipeline composing  was {str(spending_time_for_composing)}.'
+                                      f'The remaining {timeout_for_tuning} seconds are not enough '
+                                      f'to tune the hyperparameters.'
+                                      f'Composed pipeline will be returned without tuning hyperparameters.')
+        else:
+            # Tune all nodes in the pipeline
+            api_params['logger'].message('Hyperparameters tuning started')
+            vb_number = composer_requirements.validation_blocks
+            folds = composer_requirements.cv_folds
+            pipeline_gp_composed = pipeline_gp_composed.fine_tune_all_nodes(loss_function=tuner_loss,
+                                                                            loss_params=loss_params,
+                                                                            input_data=api_params['train_data'],
+                                                                            iterations=iterations,
+                                                                            timeout=round(timeout_for_tuning / 60),
+                                                                            cv_folds=folds,
+                                                                            validation_blocks=vb_number)
+        return pipeline_gp_composed
 
 
 def fit_and_check_correctness(initial_pipelines: List[Pipeline],
