@@ -5,8 +5,8 @@ from typing import Callable, List, Optional, Tuple, Union
 
 from fedot.core.composer.cache import OperationsCache
 from fedot.core.dag.graph import Graph
-from fedot.core.dag.graph_operator import GraphOperator
 from fedot.core.dag.graph_node import GraphNode
+from fedot.core.dag.graph_operator import GraphOperator
 from fedot.core.data.data import InputData
 from fedot.core.data.multi_modal import MultiModalData
 from fedot.core.log import Log, default_log
@@ -188,7 +188,7 @@ class Pipeline(Graph):
         if unfit_preprocessor:
             self.preprocessor = DataPreprocessor(self.log)
 
-    def fit_from_cache(self, cache: OperationsCache, fold_num: int = 0) -> bool:
+    def fit_from_cache(self, cache: OperationsCache, fold_num: Optional[int] = None) -> bool:
         is_cache_used = False
         for node in self.nodes:
             cached_state = cache.get(node, fold_num)

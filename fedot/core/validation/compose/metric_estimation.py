@@ -1,5 +1,7 @@
 import gc
 
+from typing import Optional
+
 from fedot.core.composer.cache import OperationsCache
 from fedot.core.data.data import InputData
 from fedot.core.repository.quality_metrics_repository import MetricsRepository
@@ -7,8 +9,8 @@ from fedot.core.repository.quality_metrics_repository import MetricsRepository
 
 def metric_evaluation(pipeline, train_data: InputData, test_data: InputData,
                       metrics: list, evaluated_metrics: list,
-                      fold_id: int = None, vb_number: int = None,
-                      cache: OperationsCache = None):
+                      fold_id: Optional[int] = None, vb_number: Optional[int] = None,
+                      cache: Optional[OperationsCache] = None):
     """ Pipeline training and metrics assessment
 
     :param pipeline: pipeline for validation
