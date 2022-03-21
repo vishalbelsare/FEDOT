@@ -1,5 +1,6 @@
 import gc
 import platform
+
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing import set_start_method
@@ -102,7 +103,7 @@ class GPComposer(Composer):
 
         self.optimiser.graph_generation_params.advisor.task = data.task
 
-        if data.task.task_type == TaskTypesEnum.ts_forecasting:
+        if data.task.task_type is TaskTypesEnum.ts_forecasting:
             self.optimiser.graph_generation_params.rules_for_constraint = ts_rules + common_rules
         else:
             self.optimiser.graph_generation_params.rules_for_constraint = common_rules
@@ -186,7 +187,7 @@ class GPComposer(Composer):
             validate(pipeline, task=train_data.task)
             pipeline.log = self.log
 
-            if type(metrics) is not list:
+            if not isinstance(metrics, list):
                 metrics = [metrics]
 
             if self.cache is not None:

@@ -1,19 +1,19 @@
 from abc import ABC, abstractmethod
-from typing import Callable, ClassVar
-from copy import deepcopy, copy
+from copy import copy, deepcopy
 from datetime import timedelta
+from typing import Callable, ClassVar
 
 import numpy as np
-from scipy.sparse import csr_matrix
-from sklearn.preprocessing import LabelEncoder
 
 from fedot.core.log import Log, default_log
-from fedot.core.repository.tasks import TaskTypesEnum
-from fedot.core.repository.dataset_types import DataTypesEnum
-from fedot.core.validation.tune.time_series import cv_time_series_predictions
-from fedot.core.validation.tune.tabular import cv_tabular_predictions
-from fedot.core.validation.tune.simple import fit_predict_one_fold
 from fedot.core.pipelines.tuning.search_space import SearchSpace
+from fedot.core.repository.dataset_types import DataTypesEnum
+from fedot.core.repository.tasks import TaskTypesEnum
+from fedot.core.validation.tune.simple import fit_predict_one_fold
+from fedot.core.validation.tune.tabular import cv_tabular_predictions
+from fedot.core.validation.tune.time_series import cv_time_series_predictions
+from scipy.sparse import csr_matrix
+from sklearn.preprocessing import LabelEncoder
 
 MAX_METRIC_VALUE = 10e6
 
@@ -97,7 +97,7 @@ class HyperoptTuner(ABC):
             # Return default metric: too small (for maximization) or too big (for minimization)
             metric_value = self._default_metric_value
 
-        if self.is_need_to_maximize is True:
+        if self.is_need_to_maximize:
             return -metric_value
         else:
             return metric_value
@@ -143,7 +143,7 @@ class HyperoptTuner(ABC):
         # 5% deviation is acceptable
         deviation = (self.init_metric / 100.0) * 5
 
-        if self.is_need_to_maximize is True:
+        if self.is_need_to_maximize:
             # Maximization
             init_metric = -1 * (self.init_metric - deviation)
             obtained_metric = -1 * obtained_metric
@@ -171,7 +171,7 @@ class HyperoptTuner(ABC):
     def _one_fold_validation(data, pipeline):
         """ Perform simple (hold-out) validation """
 
-        if data.task.task_type == TaskTypesEnum.classification:
+        if data.task.task_type is TaskTypesEnum.classification:
             test_target, preds = fit_predict_one_fold(data, pipeline)
         else:
             # For regression and time series forecasting
@@ -185,6 +185,7 @@ class HyperoptTuner(ABC):
     def _cross_validation(self, data, pipeline):
         """ Perform cross validation for metric evaluation """
 
+        preds, test_target = [], []
         if data.data_type is DataTypesEnum.table or data.data_type is DataTypesEnum.text or \
                 data.data_type is DataTypesEnum.image:
             preds, test_target = cv_tabular_predictions(pipeline, data,
@@ -270,7 +271,7 @@ def _greater_is_better(target, loss_function, loss_params, data_type) -> bool:
     if loss_params is None:
         loss_params = {}
 
-    if data_type is not DataTypesEnum.ts or DataTypesEnum.text:
+    if data_type is not DataTypesEnum.ts or DataTypesEnum.text:  # TODO: what was meant? None of these?
         try:
             target = _convert_target_dimension(target)
         except Exception:
@@ -286,7 +287,4 @@ def _greater_is_better(target, loss_function, loss_params, data_type) -> bool:
         optimal_metric = loss_function(target, optimal_multi_target, **loss_params)
         not_optimal_metric = loss_function(target, not_optimal_multi_target, **loss_params)
 
-    if optimal_metric > not_optimal_metric:
-        return True
-    else:
-        return False
+    return optimal_metric > not_optimal_metric

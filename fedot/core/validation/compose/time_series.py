@@ -39,7 +39,7 @@ def ts_metric_calculation(reference_data: Union[InputData, List[Tuple[InputData,
                                                   vb_number=validation_blocks_number,
                                                   fold_id=fold_id, cache=cache)
             fold_id += 1
-        evaluated_metrics = tuple(map(lambda x: np.mean(x), evaluated_metrics))
+        evaluated_metrics = tuple(map(np.mean, evaluated_metrics))
         log.debug(f'Pipeline {pipeline.root_node.descriptive_id} with metrics: {list(evaluated_metrics)}')
     except Exception as ex:
         log.debug(f'{__name__}. Pipeline assessment warning: {ex}. Continue.')
