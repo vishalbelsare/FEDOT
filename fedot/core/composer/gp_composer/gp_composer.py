@@ -190,14 +190,11 @@ class GPComposer(Composer):
             if not isinstance(metrics, list):
                 metrics = [metrics]
 
-            if self.cache is not None:
-                pipeline.fit_from_cache(self.cache)
-
             self.log.debug(f'Pipeline {pipeline.root_node.descriptive_id} fit started')
 
             pipeline.fit(input_data=train_data,
                          time_constraint=self.composer_requirements.max_pipeline_fit_time,
-                         use_fitted=self.cache is not None)
+                         use_fitted=pipeline.fit_from_cache(self.cache))
             self.cache.save_pipeline(pipeline)
 
             evaluated_metrics = ()

@@ -82,8 +82,8 @@ class ComposerBuilder:
 
     def build(self) -> Composer:
         optimiser_type = self.optimiser
-        if (optimiser_type == EvoGraphOptimiser and
-                self.optimiser_parameters.genetic_scheme_type == GeneticSchemeTypesEnum.parameter_free):
+        if (optimiser_type is EvoGraphOptimiser and
+                self.optimiser_parameters.genetic_scheme_type is GeneticSchemeTypesEnum.parameter_free):
             optimiser_type = EvoGraphParameterFreeOptimiser
 
         graph_generation_params = GraphGenerationParams(adapter=PipelineAdapter(self._composer.log),

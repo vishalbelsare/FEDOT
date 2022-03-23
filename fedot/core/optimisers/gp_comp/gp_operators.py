@@ -1,11 +1,12 @@
 import warnings
+
 from copy import deepcopy
 from random import choice, randint
 from typing import Any, List, Tuple
 
 from fedot.core.composer.constraint import constraint_function
 from fedot.core.log import default_log
-from fedot.core.optimisers.gp_comp.evaluating import multiprocessing_mapping, single_evaluating, determine_n_jobs
+from fedot.core.optimisers.gp_comp.evaluating import determine_n_jobs, multiprocessing_mapping, single_evaluating
 from fedot.core.optimisers.graph import OptGraph, OptNode
 from fedot.core.utils import DEFAULT_PARAMS_STUB
 from fedot.remote.remote_evaluator import RemoteEvaluator
@@ -136,7 +137,7 @@ def evaluate_individuals(individuals_set, objective_function, graph_generation_p
 
     if n_jobs != 1:
         evaluated_individuals = multiprocessing_mapping(n_jobs, reversed_individuals)
-        evaluated_individuals = list(filter(lambda x: x, evaluated_individuals))
+        evaluated_individuals = list(filter(bool, evaluated_individuals))
     else:
         evaluated_individuals = single_evaluating(reversed_individuals)
 
@@ -160,7 +161,8 @@ def filter_duplicates(archive, population) -> List[Any]:
 
 
 def duplicates_filtration(archive, population):
-    return list(filter(lambda x: not any([x.fitness == pop_ind.fitness for pop_ind in population]), archive.items))
+    population_fitnesses = {pop_ind.fitness for pop_ind in population}
+    return list(filter(lambda x: x.fitness not in population_fitnesses, archive.items))
 
 
 def clean_operators_history(population):

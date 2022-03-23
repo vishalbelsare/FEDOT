@@ -17,7 +17,7 @@ def single_evaluating(reversed_individuals):
         start_time = timeit.default_timer()
 
         graph = individual.ind.graph
-        if len(individual.pre_evaluated_objects) > 0:
+        if individual.pre_evaluated_objects:
             graph = individual.pre_evaluated_objects[individual.ind_num]
         individual.ind.fitness = calculate_objective(graph, individual.objective_function,
                                                      individual.is_multi_objective, individual.graph_generation_params)
