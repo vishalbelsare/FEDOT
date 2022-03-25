@@ -17,6 +17,19 @@ class NodeOperator:
         else:
             return 1 + max([next_node.distance_to_primary_level for next_node in self._node.nodes_from])
 
+    def distance_to_root_level(self, graph):
+        child_nodes = [n for n in graph.nodes if n.nodes_from and self._node in n.nodes_from]
+        if not child_nodes:
+            return 0
+        else:
+            return 1 + max([next_node.calculate_distance_to_root_level(graph) for next_node in child_nodes])
+
+    def get_parents(self):
+        return len(self._node.nodes_from)
+
+    def get_children(self, graph):
+        return len([n for n in graph.nodes if n.nodes_from and self._node in n.nodes_from])
+
     def ordered_subnodes_hierarchy(self, visited=None) -> List['GraphNode']:
         if visited is None:
             visited = []

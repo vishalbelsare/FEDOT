@@ -15,6 +15,10 @@ def graph_node_to_json(obj: GraphNode) -> Dict[str, Any]:
         if k not in ['_operator', '_fitted_operation', '_node_data']
     }
     encoded['content']['name'] = str(encoded['content']['name'])
+    encoded['distance_to_primary_level'] = obj.distance_to_primary_level
+    encoded['distance_to_root_level'] = obj.distance_to_root_level
+    encoded['num_of_parents'] = obj.num_of_parents
+    encoded['num_of_children'] = obj.num_of_children
     if encoded['nodes_from']:
         encoded['nodes_from'] = [
             node._serialization_id

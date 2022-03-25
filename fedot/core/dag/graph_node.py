@@ -40,3 +40,15 @@ class GraphNode:
     @property
     def distance_to_primary_level(self):
         return self._operator.distance_to_primary_level()
+
+    @property
+    def num_of_parents(self):
+        if not self.nodes_from:
+            return 0
+        return self._operator.get_parents()
+
+    def calculate_distance_to_root_level(self, graph):
+        return self._operator.distance_to_root_level(graph)
+
+    def calculate_num_of_children(self, graph):
+        return self._operator.get_children(graph)

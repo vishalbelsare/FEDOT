@@ -19,6 +19,7 @@ def run_classification_example(timeout: float = None):
     prediction = auto_model.predict_proba(features=test_data_path)
     print(auto_model.get_metrics())
     auto_model.plot_prediction()
+    auto_model.history.save('history.json')
 
     return prediction
 
