@@ -2,7 +2,7 @@ import math
 from copy import deepcopy
 from functools import partial
 from itertools import zip_longest
-from typing import (Any, Callable, List, Optional, Tuple, Union)
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
 from deap.tools import ParetoFront
@@ -181,7 +181,8 @@ class EvoGraphOptimiser(GraphOptimiser):
 
         with OptimisationTimer(log=self.log, timeout=self.requirements.timeout) as t:
             pbar = tqdm(total=self.requirements.num_of_generations,
-                        desc="Generations", unit='gen', initial=1) if show_progress else None
+                        desc="Generations", unit='gen', initial=1,
+                        disable=self.log.verbosity_level < 2) if show_progress else None
 
             self.population = self._evaluate_individuals(self.population, objective_function,
                                                          timer=t,
@@ -400,7 +401,8 @@ class EvoGraphOptimiser(GraphOptimiser):
                                                      graph_generation_params=self.graph_generation_params,
                                                      is_multi_objective=self.parameters.multi_objective,
                                                      n_jobs=n_jobs,
-                                                     timer=timer)
+                                                     timer=timer,
+                                                     log=self.log)
         individuals_set = correct_if_has_nans(evaluated_individuals, self.log)
         return individuals_set
 

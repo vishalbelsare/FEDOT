@@ -2,10 +2,10 @@ import warnings
 
 from copy import deepcopy
 from random import choice, randint
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from fedot.core.composer.constraint import constraint_function
-from fedot.core.log import default_log
+from fedot.core.log import Log, default_log
 from fedot.core.optimisers.gp_comp.evaluating import determine_n_jobs, multiprocessing_mapping, single_evaluating
 from fedot.core.optimisers.graph import OptGraph, OptNode
 from fedot.core.utils import DEFAULT_PARAMS_STUB
@@ -113,8 +113,11 @@ def num_of_parents_in_crossover(num_of_final_inds: int) -> int:
 
 
 def evaluate_individuals(individuals_set, objective_function, graph_generation_params,
-                         is_multi_objective: bool, n_jobs=1, timer=None):
-    logger = default_log('individuals evaluation logger')
+                         is_multi_objective: bool, n_jobs=1, timer=None, log: Optional[Log] = None):
+    if log is not None:
+        logger = default_log('individuals evaluation logger', log.log_file, log.verbosity_level)
+    else:
+        logger = default_log('individuals evaluation logger')
     reversed_individuals = individuals_set[::-1]
     # TODO refactor
     fitter = RemoteEvaluator()

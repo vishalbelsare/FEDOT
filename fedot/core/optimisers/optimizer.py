@@ -2,17 +2,14 @@ from abc import abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
-from typing import (Any, Callable, List, Optional, Union)
+from typing import Any, Callable, List, Optional, Union
 
 import numpy as np
 
 from fedot.core.composer.advisor import DefaultChangeAdvisor
 from fedot.core.log import Log, default_log
 from fedot.core.optimisers.adapters import BaseOptimizationAdapter, DirectAdapter
-from fedot.core.optimisers.gp_comp.gp_operators import (
-    evaluate_individuals,
-    random_graph
-)
+from fedot.core.optimisers.gp_comp.gp_operators import evaluate_individuals, random_graph
 from fedot.core.optimisers.gp_comp.individual import Individual
 from fedot.core.optimisers.graph import OptGraph
 from fedot.core.optimisers.opt_history import OptHistory
@@ -128,7 +125,8 @@ class GraphOptimiser:
         evaluated_individuals = evaluate_individuals(individuals_set=individuals_set,
                                                      objective_function=objective_function,
                                                      graph_generation_params=self.graph_generation_params,
-                                                     timer=timer, is_multi_objective=self.parameters.multi_objective)
+                                                     timer=timer, is_multi_objective=self.parameters.multi_objective,
+                                                     log=self.log)
         individuals_set = correct_if_has_nans(evaluated_individuals, self.log)
         return individuals_set
 
