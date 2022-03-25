@@ -367,7 +367,7 @@ class ApiComposer:
 
 def fit_and_check_correctness(pipeline: Pipeline,
                               data: Union[InputData, MultiModalData],
-                              logger: Log, cache: Optional[OperationsCache] = None):
+                              logger: Log, cache: OperationsCache):
     """ Test is initial pipeline can be fitted on presented data and give predictions """
     try:
         _, data_test = train_test_data_setup(data)
@@ -376,8 +376,7 @@ def fit_and_check_correctness(pipeline: Pipeline,
         logger.message('Initial pipeline fitting started')
 
         pipeline.fit(data)
-        # if cache is not None:  # TODO: uncomment and check with cache
-        #     cache.save_pipeline(pipeline)
+        cache.save_pipeline(pipeline)
         pipeline.predict(data_test)
 
         fit_time = datetime.datetime.now() - start_init_fit
