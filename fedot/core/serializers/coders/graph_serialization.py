@@ -4,6 +4,8 @@ from typing import Any, Dict, Type
 from fedot.core.dag.graph import Graph
 
 from . import any_to_json
+from ...dag.graph_node import GraphNode
+from ...optimisers.graph import OptNode
 
 
 def graph_to_json(obj: Graph) -> Dict[str, Any]:
@@ -18,11 +20,12 @@ def graph_to_json(obj: Graph) -> Dict[str, Any]:
     }
     for idx, node in enumerate(serialized_obj['nodes']):
         node._serialization_id = idx
-        node.num_of_children = node.calculate_num_of_children(obj)
-        node.distance_to_root_level = node.calculate_distance_to_root_level(obj)
-        child_nodes = [n for n in obj.nodes if n.nodes_from and node in n.nodes_from]
-        # Num of brothers is length of parents nodes for all child nodes - length of child nodes
-        node.num_of_brothers = sum([len(n.nodes_from) for n in child_nodes if n.nodes_from]) - len(child_nodes)
+        if type(node) == OptNode:
+            node.num_of_children = node.calculate_num_of_children(obj)
+            node.distance_to_root_level = node.calculate_distance_to_root_level(obj)
+            child_nodes = [n for n in obj.nodes if n.nodes_from and node in n.nodes_from]
+            # Num of brothers is length of parents nodes for all child nodes - length of child nodes
+            node.num_of_brothers = sum([len(n.nodes_from) for n in child_nodes if n.nodes_from]) - len(child_nodes)
     return serialized_obj
 
 

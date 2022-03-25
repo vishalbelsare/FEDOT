@@ -154,7 +154,7 @@ class EvoGraphOptimiser(GraphOptimiser):
 
         # add initial graph to population
         for initial_graph in initial_graphs:
-            randomized_pop.append(Individual(deepcopy(initial_graph)))
+            randomized_pop.append(Individual(deepcopy(initial_graph), is_initial=True))
 
         return randomized_pop
 

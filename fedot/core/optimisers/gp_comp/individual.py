@@ -8,7 +8,9 @@ ERROR_PREFIX = 'Invalid graph configuration:'
 
 class Individual:
     def __init__(self, graph: 'OptGraph', fitness: List[float] = None,
-                 parent_operators: List[ParentOperator] = None, computation_time: Optional[int] = None):
+                 parent_operators: List[ParentOperator] = None, computation_time: Optional[int] = None,
+                 is_initial=False):
+        self.is_initial_assumption = is_initial
         self.parent_operators = parent_operators if parent_operators is not None else []
         self.fitness = fitness
         self.computation_time = computation_time
