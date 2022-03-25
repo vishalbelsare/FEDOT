@@ -167,7 +167,8 @@ class GPComposer(Composer):
                                                 self.composer_requirements.cv_folds,
                                                 self.composer_requirements.validation_blocks,
                                                 self.metrics,
-                                                log=self.log)
+                                                log=self.log,
+                                                cache=self.cache)
 
         else:
             self.log.info("KFolds cross validation for pipeline composing was applied.")
