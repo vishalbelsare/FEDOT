@@ -7,18 +7,18 @@ from scipy.special import boxcox, inv_boxcox
 from statsmodels.tsa.api import STLForecast
 from statsmodels.tsa.arima.model import ARIMA
 
-from fedot.core.log import Log
+from fedot.core.data.data import InputData, OutputData
 from fedot.core.operations.evaluation.operation_implementations.data_operations.ts_transformations import ts_to_table
 from fedot.core.operations.evaluation.operation_implementations.implementation_interfaces import ModelImplementation
+from fedot.core.operations.operation_parameters import OperationParameters
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.utilities.ts_gapfilling import SimpleGapFiller
 
 
 class ARIMAImplementation(ModelImplementation):
 
-    def __init__(self, log: Optional[Log] = None, **params):
-        super().__init__(log)
-        self.params = params
+    def __init__(self, params: Optional[OperationParameters] = None):
+        super().__init__(params)
         self.arima = None
         self.lambda_value = None
         self.scope = None
@@ -41,81 +41,82 @@ class ARIMAImplementation(ModelImplementation):
         d = int(self.params.get('d'))
         q = int(self.params.get('q'))
         params = {'order': (p, d, q)}
+
         self.arima = ARIMA(transformed_ts, **params).fit()
 
         return self.arima
 
-    def predict(self, input_data, is_fit_pipeline_stage: bool):
+    def predict(self, input_data: InputData):
         """ Method for time series prediction on forecast length
 
         :param input_data: data with features, target and ids to process
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
+
         :return output_data: output data with smoothed time series
         """
         input_data = copy(input_data)
-        parameters = input_data.task.task_params
-        forecast_length = parameters.forecast_length
-        old_idx = input_data.idx
-        target = input_data.target
+        forecast_length = input_data.task.task_params.forecast_length
+        self.handle_new_data(input_data)
 
-        # For training pipeline get fitted data
-        if is_fit_pipeline_stage:
-            fitted_values = self.arima.fittedvalues
+        start_id = self.actual_ts_len
+        end_id = start_id + forecast_length - 1
 
-            fitted_values = self._inverse_boxcox(predicted=fitted_values,
-                                                 lambda_param=self.lambda_value)
-            # Undo shift operation
-            fitted_values = self._inverse_shift(fitted_values)
+        predicted = self.arima.predict(start=start_id,
+                                       end=end_id)
+        predicted = self._inverse_boxcox(predicted=predicted,
+                                         lambda_param=self.lambda_value)
+        predict = self._inverse_shift(predicted)
 
-            diff = int(self.actual_ts_len - len(fitted_values))
-            # If first elements skipped
-            if diff != 0:
-                # Fill nans with first values
-                first_element = fitted_values[0]
-                first_elements = [first_element] * diff
-                first_elements.extend(list(fitted_values))
-
-                fitted_values = np.array(first_elements)
-
-            _, predict = ts_to_table(idx=old_idx,
-                                     time_series=fitted_values,
-                                     window_size=forecast_length)
-
-            new_idx, target_columns = ts_to_table(idx=old_idx,
-                                                  time_series=target,
-                                                  window_size=forecast_length)
-
-            # Update idx and target
-            input_data.idx = new_idx
-            input_data.target = target_columns
-
-        # For predict stage we can make prediction
-        else:
-            start_id = old_idx[-1] - forecast_length + 1
-            end_id = old_idx[-1]
-            predicted = self.arima.predict(start=start_id,
-                                           end=end_id)
-
-            predicted = self._inverse_boxcox(predicted=predicted,
-                                             lambda_param=self.lambda_value)
-
-            # Undo shift operation
-            predict = self._inverse_shift(predicted)
-            # Convert one-dim array as column
-            predict = np.array(predict).reshape(1, -1)
-            new_idx = np.arange(start_id, end_id + 1)
-
-            # Update idx
-            input_data.idx = new_idx
-        # Update idx and features
+        predict = np.array(predict).reshape(1, -1)
         output_data = self._convert_to_output(input_data,
                                               predict=predict,
                                               data_type=DataTypesEnum.table)
 
         return output_data
 
-    def get_params(self):
-        return self.params
+    def predict_for_fit(self, input_data: InputData):
+        input_data = copy(input_data)
+        forecast_length = input_data.task.task_params.forecast_length
+        fitted_values = self.arima.fittedvalues
+
+        fitted_values = self._inverse_boxcox(predicted=fitted_values,
+                                             lambda_param=self.lambda_value)
+        fitted_values = self._inverse_shift(fitted_values)
+
+        diff = int(self.actual_ts_len - len(fitted_values))
+        # If first elements skipped
+        if diff != 0:
+            # Fill nans with first values
+            first_element = fitted_values[0]
+            first_elements = [first_element] * diff
+            first_elements.extend(list(fitted_values))
+
+            fitted_values = np.array(first_elements)
+
+        _, predict = ts_to_table(idx=input_data.idx,
+                                 time_series=fitted_values,
+                                 window_size=forecast_length)
+
+        new_idx, target_columns = ts_to_table(idx=input_data.idx,
+                                              time_series=input_data.target,
+                                              window_size=forecast_length)
+        input_data.idx = new_idx
+        input_data.target = target_columns
+
+        output_data = self._convert_to_output(input_data,
+                                              predict=predict,
+                                              data_type=DataTypesEnum.table)
+
+        return output_data
+
+    def handle_new_data(self, input_data: InputData):
+        """
+        Method to update x samples inside a model (used when we want to use old model to a new data)
+
+        :param input_data: new input_data
+        """
+        if input_data.idx[0] > self.actual_ts_len:
+            self.arima = self.fit(input_data)
+            self.log.info("Arima refitted for handling a new data")
 
     def _apply_boxcox(self, source_ts):
         min_value = np.min(source_ts)
@@ -169,9 +170,8 @@ class ARIMAImplementation(ModelImplementation):
 
 
 class STLForecastARIMAImplementation(ModelImplementation):
-    def __init__(self, log: Optional[Log] = None, **params: Optional[dict]):
-        super().__init__(log)
-        self.params = params
+    def __init__(self, params: Optional[OperationParameters] = None):
+        super().__init__(params)
         self.model = None
         self.lambda_param = None
         self.scope = None
@@ -187,74 +187,74 @@ class STLForecastARIMAImplementation(ModelImplementation):
         # Save actual time series length
         self.actual_ts_len = len(source_ts)
 
-        if not self.params:
-            # Default data
-            self.params = {'p': 2, 'd': 0, 'q': 2, 'period': 365}
-
-        p = int(self.params.get('p'))
-        d = int(self.params.get('d'))
-        q = int(self.params.get('q'))
-        period = int(self.params.get('period'))
+        p = int(self.params.setdefault('p', 2))
+        d = int(self.params.setdefault('d', 0))
+        q = int(self.params.setdefault('q', 2))
+        period = int(self.params.setdefault('period', 365))
         params = {'period': period, 'model_kwargs': {'order': (p, d, q)}}
         self.model = STLForecast(source_ts, ARIMA, **params).fit()
 
         return self.model
 
-    def predict(self, input_data, is_fit_pipeline_stage: bool):
+    def predict(self, input_data: InputData) -> OutputData:
         """ Method for time series prediction on forecast length
 
         :param input_data: data with features, target and ids to process
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
+
         :return output_data: output data with smoothed time series
         """
         parameters = input_data.task.task_params
         forecast_length = parameters.forecast_length
-        old_idx = input_data.idx
-        target = input_data.target
 
-        # For training pipeline get fitted data
-        if is_fit_pipeline_stage:
-            fitted_values = self.model.get_prediction(start=old_idx[0], end=old_idx[-1]).predicted_mean
-            diff = int(self.actual_ts_len) - len(fitted_values)
-            # If first elements skipped
-            if diff != 0:
-                # Fill nans with first values
-                first_element = fitted_values[0]
-                first_elements = [first_element] * diff
-                first_elements.extend(list(fitted_values))
+        # in case in(out) sample forecasting
+        self.handle_new_data(input_data)
+        start_id = self.actual_ts_len
+        end_id = start_id + forecast_length - 1
+        predicted = self.model.get_prediction(start=start_id, end=end_id).predicted_mean
 
-                fitted_values = np.array(first_elements)
+        predict = np.array(predicted).reshape(1, -1)
+        new_idx = np.arange(start_id, end_id + 1)
 
-            _, predict = ts_to_table(idx=old_idx,
-                                     time_series=fitted_values,
-                                     window_size=forecast_length)
+        input_data.idx = new_idx
 
-            new_idx, target_columns = ts_to_table(idx=old_idx,
-                                                  time_series=target,
-                                                  window_size=forecast_length)
-
-            # Update idx and target
-            input_data.idx = new_idx
-            input_data.target = target_columns
-
-        # For predict stage we can make prediction
-        else:
-            start_id = old_idx[-1] - forecast_length + 1
-            end_id = old_idx[-1]
-            predicted = self.model.get_prediction(start=start_id, end=end_id).predicted_mean
-
-            # Convert one-dim array as column
-            predict = np.array(predicted).reshape(1, -1)
-            new_idx = np.arange(start_id, end_id + 1)
-
-            # Update idx
-            input_data.idx = new_idx
-
-        # Update idx and features
         output_data = self._convert_to_output(input_data,
                                               predict=predict,
                                               data_type=DataTypesEnum.table)
         return output_data
 
-    def get_params(self):
-        return self.params
+    def predict_for_fit(self, input_data: InputData) -> OutputData:
+        parameters = input_data.task.task_params
+        forecast_length = parameters.forecast_length
+        idx = input_data.idx
+        target = input_data.target
+        fitted_values = self.model.get_prediction(start=idx[0], end=idx[-1]).predicted_mean
+        diff = int(self.actual_ts_len) - len(fitted_values)
+        # If first elements skipped
+        if diff != 0:
+            # Fill nans with first values
+            first_element = fitted_values[0]
+            first_elements = [first_element] * diff
+            first_elements.extend(list(fitted_values))
+
+            fitted_values = np.array(first_elements)
+
+        _, predict = ts_to_table(idx=idx,
+                                 time_series=fitted_values,
+                                 window_size=forecast_length)
+
+        new_idx, target_columns = ts_to_table(idx=idx,
+                                              time_series=target,
+                                              window_size=forecast_length)
+
+        input_data.idx = new_idx
+        input_data.target = target_columns
+        output_data = self._convert_to_output(input_data,
+                                              predict=predict,
+                                              data_type=DataTypesEnum.table)
+        return output_data
+
+    def handle_new_data(self, input_data: InputData):
+        """ Refit model if use new test data"""
+        if input_data.idx[0] > self.actual_ts_len:
+            self.model = self.fit(input_data)
+            self.log.info("STL Arima refitted for handling a new data")

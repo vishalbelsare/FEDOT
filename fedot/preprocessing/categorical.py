@@ -1,11 +1,11 @@
 from copy import deepcopy
+
 import numpy as np
 import pandas as pd
-
 from sklearn.preprocessing import LabelEncoder
+
 from fedot.core.data.data import InputData
-from fedot.core.data.data_preprocessing import find_categorical_columns
-from fedot.preprocessing.data_types import NAME_CLASS_INT, FEDOT_STR_NAN
+from fedot.preprocessing.data_types import FEDOT_STR_NAN, TYPE_TO_ID
 
 
 class BinaryCategoricalPreprocessor:
@@ -23,80 +23,69 @@ class BinaryCategoricalPreprocessor:
         Find indices of columns which are contains categorical values. Binary features and at the same time
         has str objects. If there are such features - convert it into int
         """
-        features_types = input_data.supplementary_data.column_types['features']
-        categorical_ids, non_categorical_ids = find_categorical_columns(table=input_data.features,
-                                                                        column_types=features_types)
-        if len(categorical_ids) < 0:
-            # There is no need to process categorical features
-            return self
+        # TODO: Add log.message with binary ids
+        if np.size(input_data.categorical_idx) != 0:
+            categorical_columns = input_data.features[:, input_data.categorical_idx].T
+            nan_matrix = pd.DataFrame(categorical_columns.T, columns=input_data.categorical_idx).isna().values.T
+            nuniques = np.array([
+                len(np.unique(col[~is_nan])) for col, is_nan in zip(categorical_columns, nan_matrix)
+            ])
 
-        binary_ids_to_convert = []
-        number_of_columns = input_data.features.shape[-1]
-        for column_id, number in enumerate(range(number_of_columns)):
-            column = np.array(input_data.features[:, column_id])
+            binary_ids_to_convert = []
 
-            # Numpy with strings cannot be processed for nans search - so use pandas
-            pd_column = pd.Series(column)
-            is_row_has_nan = pd.isna(pd_column)
-            nans_number = is_row_has_nan.sum()
-            if nans_number > 0 and column_id in categorical_ids:
-                # This categorical column has nans
-                column, gap_ids = replace_nans_with_fedot_nans(column, is_row_has_nan)
-                column_uniques = np.unique(column)
+            for i, (column_id, column_nuniques, is_nan) in enumerate(
+                    zip(input_data.categorical_idx, nuniques, nan_matrix)
+            ):
+                if is_nan.any():
+                    # This categorical column has nans
+                    categorical_columns[i, np.where(is_nan)[0]] = FEDOT_STR_NAN
+                    column_nuniques = len(set(categorical_columns[i]))
 
-                if len(column_uniques) <= 3:
-                    # There is column with binary categories and gaps
-                    self.binary_features_with_nans.append(column_id)
-                    binary_ids_to_convert.append(column_id)
-                    self._train_encoder(column, column_id)
-            else:
-                column_uniques = np.unique(column)
-                if len(column_uniques) <= 2 and column_id in categorical_ids:
+                    if column_nuniques <= 3:
+                        # There is column with binary categories and gaps
+                        self.binary_features_with_nans.append(column_id)
+                        binary_ids_to_convert.append(column_id)
+                        self._train_encoder(pd.Series(categorical_columns[i], name=column_id))
+
+                elif column_nuniques <= 2:
                     # Column contains binary string feature
                     binary_ids_to_convert.append(column_id)
-
                     # Train encoder for current column
-                    self._train_encoder(column, column_id)
+                    self._train_encoder(pd.Series(categorical_columns[i], name=column_id))
 
-        self.binary_ids_to_convert = binary_ids_to_convert
+            # Remove binary columns from categorical_idx
+            input_data.categorical_idx = [idx for idx in input_data.categorical_idx if idx not in binary_ids_to_convert]
+            input_data.categorical_idx = np.array(input_data.categorical_idx)
+            self.binary_ids_to_convert = binary_ids_to_convert
+
         return self
 
     def transform(self, input_data: InputData) -> InputData:
         """
         Apply transformation (converting str into integers) for selected (while training) features.
         """
-        if len(self.binary_ids_to_convert) == 0:
-            # There are no binary categorical features
-            return input_data
-
-        converted_features = []
-        number_of_columns = input_data.features.shape[-1]
-        for column_id, number in enumerate(range(number_of_columns)):
-            if column_id in self.binary_ids_to_convert:
-                # If column contains nans - replace them with fedot nans special string
-                column = input_data.features[:, column_id]
-                is_row_has_nan = pd.isna(pd.Series(column))
-                column, gap_ids = replace_nans_with_fedot_nans(column, is_row_has_nan)
-
-                # Convert into integers
-                converted_column = self._apply_encoder(column, column_id, gap_ids)
-            else:
-                # Stay column the same
-                converted_column = np.array(input_data.features[:, column_id])
-
-            converted_features.append(converted_column.reshape((-1, 1)))
-
-        # Store transformed features
         copied_data = deepcopy(input_data)
-        copied_data.features = np.hstack(converted_features)
+        self._apply_encoder(copied_data.features)
 
         # Update features types
-        features_types = copied_data.supplementary_data.column_types['features']
-        for converted_column_id in self.binary_ids_to_convert:
-            features_types[converted_column_id] = NAME_CLASS_INT
+        feature_type_ids = copied_data.supplementary_data.col_type_ids['features']
+        feature_type_ids[self.binary_ids_to_convert] = TYPE_TO_ID[int]
         return copied_data
 
-    def _train_encoder(self, column: np.array, column_id: int):
+    def fit_transform(self, input_data: InputData) -> InputData:
+        """
+        Applies firstly :method:`fit` and then :method:`transform` methods of the class
+
+        Args:
+            input_data: to be trained on and transformed
+
+        Returns:
+            transformed ``input_data``
+        """
+        self.fit(input_data)
+        return self.transform(input_data)
+
+    def _train_encoder(self, column: pd.Series):
         """ Convert labels in the column from string into int via Label encoding.
         So, Label encoder is fitted to do such transformation.
         """
@@ -104,35 +93,26 @@ class BinaryCategoricalPreprocessor:
         encoder.fit(column)
 
         # Store fitted label encoder for transform method
-        self.binary_encoders.update({column_id: encoder})
+        self.binary_encoders[column.name] = encoder
 
-    def _apply_encoder(self, column: np.array, column_id: int, gap_ids: np.array) -> np.array:
-        """ Apply already fitted encoders """
-        encoder = self.binary_encoders[column_id]
-        encoder_classes = list(encoder.classes_)
+    def _apply_encoder(self, data: np.ndarray):
+        """
+        Applies already fitted encoders to all binary features inplace
 
-        # If the column contains categories not previously encountered
-        for label in list(set(column)):
-            if label not in encoder_classes:
-                encoder_classes.append(label)
+        Args:
+            data: numpy array with all features
+        """
+        binary_columns = data[:, self.binary_ids_to_convert]
+        for column_id, column in zip(self.binary_ids_to_convert, binary_columns.T):
+            encoder = self.binary_encoders[column_id]
+            nan_idxs = np.flatnonzero(pd.isna(column))
+            column[nan_idxs] = FEDOT_STR_NAN
+            # Extend encoder classes if the column contains categories not previously encountered
+            encoder.classes_ = np.unique(np.concatenate((encoder.classes_, column)))
 
-        # Extent encoder classes
-        encoder.classes_ = encoder_classes
-
-        converted = encoder.transform(column)
-        if len(gap_ids) > 0:
-            # Column has nans in its structure - after conversion replace it
-            converted = converted.astype(float)
-            converted[gap_ids] = np.nan
-
-        return converted
-
-
-def replace_nans_with_fedot_nans(column: np.array, is_row_has_nan):
-    # There are nans in the columns - find indices of such objects
-    # True > 0
-    gap_ids = np.ravel(np.argwhere(is_row_has_nan.values > 0))
-
-    # Add new category - 'fedot_nan' after converting it will be replaced by nans
-    column[gap_ids] = FEDOT_STR_NAN
-    return column, gap_ids
+            converted = encoder.transform(column)
+            if len(nan_idxs):
+                # Column has nans in its structure - replace them after conversion
+                converted = converted.astype(float)
+                converted[nan_idxs] = np.nan
+            data[:, column_id] = converted

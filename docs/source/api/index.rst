@@ -1,22 +1,18 @@
-API
-===
+Modules
+=======
 
 .. toctree::
    :glob:
    :maxdepth: 1
 
    api
+   api_builder
    composer
-   graph
-   graph_node
-   pipeline
+   data
+   strategies
+   transformations
    node
    operation
-   eval_strategy
-   tuning
+   pipeline
    repository
-   data
-   logging
-   sensitivity
    synthetic_dataset_generator
-   profiler

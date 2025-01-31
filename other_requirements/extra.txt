@@ -1,0 +1,18 @@
+# DNNs
+tensorflow >= 2.8.0; python_version >= '3.8'
+torch >= 1.9.0
+
+# Images
+opencv-python >= 4.5.5.64
+Pillow >= 8.2.0
+
+# Texts
+gensim==4.3.2
+nltk==3.8.1
+
+# Misc
+protobuf~=3.19.0
+
+# Topological features
+giotto_tda==0.6.0
+ripser==0.6.4

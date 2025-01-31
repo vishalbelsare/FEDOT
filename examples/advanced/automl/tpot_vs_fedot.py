@@ -1,13 +1,17 @@
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score as roc_auc
-from sklearn.naive_bayes import BernoulliNB
-from sklearn.pipeline import make_pipeline
-from tpot.builtins import StackingEstimator
-from tpot.export_utils import set_param_recursive
+import numpy  # NOQA
 
-from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
-from fedot.core.data.data import InputData
+numpy.float = numpy.float64  # tmp patch before TPOT could fix this: https://github.com/EpistasisLab/tpot/issues/1281 # NOQA
+
+from sklearn.ensemble import RandomForestClassifier  # NOQA
+from sklearn.metrics import roc_auc_score as roc_auc  # NOQA
+from sklearn.naive_bayes import BernoulliNB  # NOQA
+from sklearn.pipeline import make_pipeline  # NOQA
+from tpot.builtins import StackingEstimator  # NOQA
+from tpot.export_utils import set_param_recursive  # NOQA
+
+from fedot.core.pipelines.pipeline import Pipeline  # NOQA
+from fedot.core.pipelines.node import PipelineNode  # NOQA
+from fedot.core.data.data import InputData  # NOQA
 
 
 def run_tpot_vs_fedot_example(train_file_path: str, test_file_path: str):
@@ -35,9 +39,9 @@ def run_tpot_vs_fedot_example(train_file_path: str, test_file_path: str):
 
     print(f'ROC AUC for TPOT: {roc_auc_value}')
 
-    node_scaling = PrimaryNode('scaling')
-    node_bernb = SecondaryNode('bernb', nodes_from=[node_scaling])
-    node_rf = SecondaryNode('rf', nodes_from=[node_bernb, node_scaling])
+    node_scaling = PipelineNode('scaling')
+    node_bernb = PipelineNode('bernb', nodes_from=[node_scaling])
+    node_rf = PipelineNode('rf', nodes_from=[node_bernb, node_scaling])
     pipeline = Pipeline(node_rf)
 
     pipeline.fit(train_data)
@@ -51,7 +55,7 @@ def run_tpot_vs_fedot_example(train_file_path: str, test_file_path: str):
 
 
 if __name__ == '__main__':
-    train_file_path = "../../../cases/data/scoring/scoring_train.csv"
-    test_file_path = "../../../cases/data/scoring/scoring_test.csv"
+    train_file_path = "../../real_examples/real_cases/data/scoring/scoring_train.csv"
+    test_file_path = "../../real_examples/real_cases/data/scoring/scoring_test.csv"
 
     run_tpot_vs_fedot_example(train_file_path, test_file_path)

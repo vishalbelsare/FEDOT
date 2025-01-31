@@ -2,11 +2,11 @@ import os
 from typing import Tuple
 
 from fedot.core.operations.operation_template import OperationTemplateAbstract, check_existing_path
-from fedot.core.pipelines.node import Node
+from fedot.core.pipelines.node import PipelineNode
 
 
 class AtomizedModelTemplate(OperationTemplateAbstract):
-    def __init__(self, node: Node = None, operation_id: int = None, nodes_from: list = None, path: str = None):
+    def __init__(self, node: PipelineNode = None, operation_id: int = None, nodes_from: list = None, path: str = None):
         # Need use the imports inside the class because of the problem of circular imports.
         from fedot.core.pipelines.pipeline import Pipeline
         from fedot.core.pipelines.template import PipelineTemplate
@@ -18,15 +18,14 @@ class AtomizedModelTemplate(OperationTemplateAbstract):
         self.pipeline_template = None
 
         if path:
-            pipeline = Pipeline()
-            pipeline.load(path)
+            pipeline = Pipeline.from_serialized(path)
             self.next_pipeline_template = AtomizedModel(pipeline)
             self.pipeline_template = PipelineTemplate(pipeline)
 
         if node:
             self._operation_to_template(node, operation_id, nodes_from)
 
-    def _operation_to_template(self, node: Node, operation_id: int, nodes_from: list):
+    def _operation_to_template(self, node: PipelineNode, operation_id: int, nodes_from: list):
         from fedot.core.pipelines.template import PipelineTemplate
 
         self.operation_id = operation_id
@@ -64,7 +63,7 @@ class AtomizedModelTemplate(OperationTemplateAbstract):
     def export_operation(self, path: str):
         absolute_path = os.path.join(path, self.atomized_model_json_path)
         check_existing_path(absolute_path)
-        self.pipeline_template.export_pipeline(absolute_path)
+        self.pipeline_template.export_pipeline(absolute_path, create_subdir=False)
 
     def import_json(self, operation_object: dict):
         required_fields = ['operation_id', 'operation_type', 'nodes_from', 'atomized_model_json_path']

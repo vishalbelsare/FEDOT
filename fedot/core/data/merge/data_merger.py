@@ -1,11 +1,14 @@
-from typing import List, Iterable, Union
+from typing import List, Iterable, Union, Optional
 
+import numpy as np
+
+from golem.core.log import default_log
+from golem.utilities.data_structures import are_same_length
+
+from fedot.core.data.array_utilities import find_common_elements, atleast_2d, atleast_4d, flatten_extra_dim
 from fedot.core.data.data import OutputData, InputData
 from fedot.core.data.merge.supplementary_data_merger import SupplementaryDataMerger
-from fedot.core.log import Log, default_log
 from fedot.core.repository.dataset_types import DataTypesEnum
-from fedot.core.data.array_utilities import *
-from fedot.core.utilities.data_structures import are_same_length
 
 
 class DataMerger:
@@ -20,8 +23,8 @@ class DataMerger:
     :param outputs: list with OutputData from parent nodes for merging
     """
 
-    def __init__(self, outputs: List['OutputData'], data_type: DataTypesEnum = None, log: Log = None):
-        self.log = log or default_log(__name__)
+    def __init__(self, outputs: List['OutputData'], data_type: DataTypesEnum = None):
+        self.log = default_log(self)
         self.outputs = outputs
         self.data_type = data_type or DataMerger.get_datatype_for_merge(output.data_type for output in outputs)
 
@@ -29,13 +32,13 @@ class DataMerger:
         idx_list = [np.asarray(output.idx) for output in outputs]
         self.common_indices = find_common_elements(*idx_list)
         if len(self.common_indices) == 0:
-            raise ValueError(f'There are no common indices for outputs')
+            raise ValueError('There are no common indices for outputs')
 
         # Find first output with the main target & resulting task
         self.main_output = DataMerger.find_main_output(outputs)
 
     @staticmethod
-    def get(outputs: List['OutputData'], log: Log = None) -> 'DataMerger':
+    def get(outputs: List['OutputData']) -> 'DataMerger':
         """ Construct appropriate data merger for the outputs. """
 
         # Ensure outputs can be merged
@@ -53,7 +56,7 @@ class DataMerger:
         cls = merger_by_type.get(data_type)
         if not cls:
             raise ValueError(f'Unable to merge data type {cls}')
-        return cls(outputs, data_type, log=log)
+        return cls(outputs, data_type)
 
     @staticmethod
     def get_datatype_for_merge(data_types: Iterable[DataTypesEnum]) -> Optional[DataTypesEnum]:
@@ -71,10 +74,15 @@ class DataMerger:
         merged_features = self.merge_predicts(mergeable_predicts)
         merged_features = self.postprocess_predicts(merged_features)
 
-        updated_metadata = SupplementaryDataMerger(self.outputs, self.main_output, self.log).merge()
+        updated_metadata = SupplementaryDataMerger(self.outputs, self.main_output).merge()
 
         return InputData(idx=common_idx, features=merged_features, target=filtered_main_target,
                          task=self.main_output.task, data_type=self.data_type,
+                         numerical_idx=self.main_output.numerical_idx,
+                         categorical_idx=self.main_output.categorical_idx,
+                         encoded_idx=self.main_output.encoded_idx,
+                         categorical_features=self.main_output.categorical_features,
+                         features_names=self.main_output.features_names,
                          supplementary_data=updated_metadata)
 
     def merge_targets(self) -> np.array:
@@ -166,10 +174,15 @@ class TSDataMerger(DataMerger):
 class TextDataMerger(DataMerger):
 
     def merge_predicts(self, predicts: List[np.array]) -> np.array:
+        if any(len(pred.shape) > 2 for pred in predicts):
+            raise ValueError('Merge of arrays with more than 2 dimensions is not supported')
         if len(predicts) > 1:
-            raise ValueError("Text tables and merge of text data is not supported")
+            predicts = [predict.astype(str) for predict in predicts]
+            result = predicts[0]
+            for i in range(1, len(predicts)):
+                result = np.core.defchararray.add(result, predicts[i])
+            return result
         return predicts[0]
 
     def postprocess_predicts(self, merged_predicts: np.array) -> np.array:
-        # Ensure that 1d-column text remains 1d
-        return flatten_extra_dim(merged_predicts)
+        return merged_predicts

@@ -9,10 +9,7 @@ from fedot.core.pipelines.pipeline_builder import PipelineBuilder
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
 from fedot.utilities.synth_dataset_generator import generate_synthetic_data
-
 from test.unit.data_operations.test_data_operations_implementations import get_time_series
-
-np.random.seed(2021)
 
 testing_pipeline_builders = {
     'lagged-ridge':
@@ -51,7 +48,7 @@ def get_output_timeseries(len_forecast=5, length=100, num_variables=1, for_predi
         idx = np.arange(0, length)
         predict = features
 
-    predict_output = OutputData(idx, features, task, DataTypesEnum.ts, predict=predict)
+    predict_output = OutputData(idx, task, DataTypesEnum.ts, features=features, predict=predict)
     return predict_output
 
 
@@ -85,9 +82,9 @@ def output_ts_different_idx(request):
 
 
 def test_data_merge_ts_pipelines(ts_pipelines):
-    train_input, predict_input, test_data = get_time_series()
+    train_input, predict_input, _ = get_time_series()
 
-    pipeline = ts_pipelines.to_pipeline()
+    pipeline = ts_pipelines.build()
 
     pipeline.fit_from_scratch(train_input)
     predicted_output = pipeline.predict(predict_input)

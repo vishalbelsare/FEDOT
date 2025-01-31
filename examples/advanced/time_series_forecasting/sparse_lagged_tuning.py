@@ -1,15 +1,20 @@
+import os
 import timeit
 import warnings
-import pandas as pd
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from golem.core.tuning.simultaneous import SimultaneousTuner
+from sklearn.metrics import mean_absolute_error
 
 from examples.simple.time_series_forecasting.ts_pipelines import ts_complex_dtreg_pipeline
-from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
 from fedot.core.data.data import InputData
+from fedot.core.pipelines.tuning.tuner_builder import TunerBuilder
 from fedot.core.repository.dataset_types import DataTypesEnum
-from fedot.core.pipelines.tuning.unified import PipelineTuner
-from sklearn.metrics import mean_absolute_error
+from fedot.core.repository.metrics_repository import RegressionMetricsEnum
+from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
+from fedot.core.utils import fedot_project_root
 
 warnings.filterwarnings('ignore')
 
@@ -66,14 +71,16 @@ def run_tuning_test(pipeline, train_input, predict_input, test_data, task, show_
     # Predict
     predicted_values = pipeline.predict(predict_input)
     old_predicted_values = predicted_values.predict
+    cv_folds = 3
 
     start_time = timeit.default_timer()
-    pipeline_tuner = PipelineTuner(pipeline=pipeline, task=task,
-                                   iterations=20)
-    pipeline = pipeline_tuner.tune_pipeline(input_data=train_input,
-                                            loss_function=mean_absolute_error,
-                                            cv_folds=3,
-                                            validation_blocks=2)
+    pipeline_tuner = TunerBuilder(task)\
+        .with_tuner(SimultaneousTuner)\
+        .with_metric(RegressionMetricsEnum.MAE)\
+        .with_cv_folds(cv_folds) \
+        .with_iterations(20) \
+        .build(train_input)
+    pipeline = pipeline_tuner.tune(pipeline)
     print(pipeline.print_structure())
     amount_of_seconds = timeit.default_timer() - start_time
     print(f'\nTuning pipline on {amount_of_seconds:.2f} seconds\n')
@@ -121,9 +128,8 @@ def visualize(tuned, no_tuned, time, method_name):
     plt.show()
 
 
-def run_tuning_comparison(n_repits=10, ts_size=1000, forecast_length=50, is_visualize=True):
-    file_path = '../../cases/data/time_series/temperature.csv'
-
+def run_tuning_comparison(n_repits=10, ts_size=1000, forecast_length=50, visualization=True):
+    file_path = os.path.join(str(fedot_project_root()), 'examples/real_cases/data/time_series/temperature.csv')
     df = pd.read_csv(file_path)
     time_series = np.array(df['value'])[:ts_size]
 
@@ -155,7 +161,7 @@ def run_tuning_comparison(n_repits=10, ts_size=1000, forecast_length=50, is_visu
             mae_no_tuning.append(mae_before)
             mae_tuning.append(mae_after)
 
-        if is_visualize:
+        if visualization:
             visualize(mae_tuning, mae_no_tuning, time_list, name)
 
         print(f'Mean time: {np.array(time_list).mean()}')
@@ -165,4 +171,4 @@ def run_tuning_comparison(n_repits=10, ts_size=1000, forecast_length=50, is_visu
 
 if __name__ == '__main__':
     # On large time series the speed of sparse_lagged increase (ts_size parameter)
-    run_tuning_comparison(n_repits=10, ts_size=1000, forecast_length=50, is_visualize=True)
+    run_tuning_comparison(n_repits=10, ts_size=1000, forecast_length=50, visualization=True)

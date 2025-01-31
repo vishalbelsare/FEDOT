@@ -1,13 +1,13 @@
 import os
 from abc import ABC, abstractmethod
 from io import BytesIO
-from typing import Optional
+from typing import Any, Optional, Union
 
 import joblib
 import numpy as np
+from golem.core.log import default_log
 
-from fedot.core.log import Log, default_log
-from fedot.core.pipelines.node import Node
+from fedot.core.pipelines.node import PipelineNode
 
 
 class OperationTemplateAbstract(ABC):
@@ -17,15 +17,15 @@ class OperationTemplateAbstract(ABC):
     Atomized_operation is pipeline which can be used like general operation.
     """
 
-    def __init__(self, log: Optional[Log] = None):
+    def __init__(self):
         self.operation_id = None
         self.operation_type = None
         self.nodes_from = None
 
-        self.log = log or default_log(__name__)
+        self.log = default_log(self)
 
     @abstractmethod
-    def _operation_to_template(self, node: Node, operation_id: int, nodes_from: list):
+    def _operation_to_template(self, node: PipelineNode, operation_id: int, nodes_from: list):
         """
         Preprocessing for local fields
         :param node: current node
@@ -63,7 +63,7 @@ class OperationTemplateAbstract(ABC):
 
 
 class OperationTemplate(OperationTemplateAbstract):
-    def __init__(self, node: Node = None, operation_id: int = None,
+    def __init__(self, node: PipelineNode = None, operation_id: int = None,
                  nodes_from: list = None):
         super().__init__()
         self.operation_name = None
@@ -76,12 +76,12 @@ class OperationTemplate(OperationTemplateAbstract):
         if node:
             self._operation_to_template(node, operation_id, nodes_from)
 
-    def _operation_to_template(self, node: Node, operation_id: int, nodes_from: list):
+    def _operation_to_template(self, node: PipelineNode, operation_id: int, nodes_from: list):
         self.operation_id = operation_id
         if not isinstance(node.operation, str):
             # for model-based operations
             self.operation_type = node.operation.operation_type
-            self.custom_params = node.custom_params
+            self.custom_params = node.parameters
             self.params = self._create_full_params(node)
 
             if _is_node_fitted(node):
@@ -96,7 +96,7 @@ class OperationTemplate(OperationTemplateAbstract):
         self.nodes_from = nodes_from
         self.rating = node.rating
 
-    def _create_full_params(self, node: Node) -> dict:
+    def _create_full_params(self, node: PipelineNode) -> dict:
         wrapped_operations = ['base_estimator', 'estimator']
 
         params = {}
@@ -115,7 +115,7 @@ class OperationTemplate(OperationTemplateAbstract):
 
         return params
 
-    def _extract_fields_of_fitted_operation(self, node: Node):
+    def _extract_fields_of_fitted_operation(self, node: PipelineNode):
         if 'h2o' in self.operation_type:
             self.fitted_operation_path = os.path.join('fitted_operations', f"h2o_{self.operation_id}")
         else:
@@ -143,34 +143,36 @@ class OperationTemplate(OperationTemplateAbstract):
 
         return operation_object
 
-    def export_operation(self, path: str = None):
-        if path:
-            check_existing_path(path)
+    def export_operation(self, return_path: str = None) -> Optional[Union[str, bytes, Any]]:
+        """Export fitted operation: either by path or directly as bytes-like object.
+        Returns None for not fitted operation.
+
+        :param return_path: path to directory for exporting the operation.
+        If None, then bytes-like object is returned directly.
+        """
+        if not self.fitted_operation:
+            return None
+
+        if return_path:
+            check_existing_path(return_path)
 
             # dictionary with paths to saved fitted operations
-            if self.fitted_operation:
-                if 'h2o' in self.operation_type:
-                    self.fitted_operation_path = self.fitted_operation.save_operation(
-                        os.path.join(path, 'fitted_operations'),
-                        self.operation_id
-                    )
-
-                    return self.fitted_operation_path
-                else:
-                    path_fitted_operations = os.path.join(path, 'fitted_operations')
-                    check_existing_path(path_fitted_operations)
-                    joblib.dump(self.fitted_operation, os.path.join(path, self.fitted_operation_path))
-                    return os.path.join(path_fitted_operations, f'operation_{self.operation_id}.pkl')
+            if 'h2o' in self.operation_type:
+                self.fitted_operation_path = self.fitted_operation.save_operation(
+                    os.path.join(return_path, 'fitted_operations'),
+                    self.operation_id
+                )
+                return self.fitted_operation_path
             else:
-                return None
+                path_fitted_operations = os.path.join(return_path, 'fitted_operations')
+                check_existing_path(path_fitted_operations)
+                joblib.dump(self.fitted_operation, os.path.join(return_path, self.fitted_operation_path))
+                return os.path.join(path_fitted_operations, f'operation_{self.operation_id}.pkl')
         else:
             # dictionary with bytes of fitted operations
-            if self.fitted_operation:
-                bytes_container = BytesIO()
-                joblib.dump(self.fitted_operation, bytes_container)
-                return bytes_container
-            else:
-                return None
+            bytes_container = BytesIO()
+            joblib.dump(self.fitted_operation, bytes_container)
+            return bytes_container
 
     def import_json(self, operation_object: dict):
         required_fields = ['operation_id', 'operation_type', 'params', 'nodes_from']
@@ -203,8 +205,8 @@ def check_existing_path(path: str):
         os.makedirs(path)
 
 
-def extract_operation_params(node: Node):
-    params = node.custom_params
+def extract_operation_params(node: PipelineNode):
+    params = node.parameters
 
     if 'dtype' in params:
         params['dtype'] = params['dtype'].__name__
@@ -212,9 +214,9 @@ def extract_operation_params(node: Node):
     return params
 
 
-def _extract_operation_name(node: Node):
+def _extract_operation_name(node: PipelineNode):
     return node.fitted_operation.__class__.__name__
 
 
-def _is_node_fitted(node: Node) -> bool:
+def _is_node_fitted(node: PipelineNode) -> bool:
     return bool(node.fitted_operation)

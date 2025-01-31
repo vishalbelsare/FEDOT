@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 
@@ -10,7 +10,7 @@ from fedot.core.repository.tasks import TaskTypesEnum
 @dataclass
 class SupplementaryData:
     """
-    A class that stores variables for for internal purposes in core during fit
+    A class that stores variables for internal purposes in core during fit
     and predict. For instance, to manage dataflow properties.
     """
     # Is it data in the main branch
@@ -21,12 +21,16 @@ class SupplementaryData:
     features_mask: Optional[dict] = None
     # Last visited nodes
     previous_operations: Optional[list] = None
-    # Is there a data was preprocessed or not
-    was_preprocessed: bool = False
+    # Was the data obligatorily preprocessed before or not
+    obligatorily_preprocessed: bool = False
+    # Was the data optionally preprocessed before or not
+    optionally_preprocessed: bool = False
     # Collection with non-int indexes
     non_int_idx: Optional[list] = None
-    # Dictionary with features and target column types
-    column_types: Optional[dict] = None
+    # Dictionary with features and target column type numeric identificators
+    col_type_ids: Optional[Dict[str, np.ndarray]] = None
+    # Was the data preprocessed before composer
+    is_auto_preprocessed: bool = False
 
     @property
     def compound_mask(self):
@@ -51,9 +55,9 @@ class SupplementaryData:
         :param task: task to solve
         """
         if not isinstance(self.previous_operations, list) or len(self.previous_operations) == 1:
-            raise ValueError(f'Data was received from one node but at least two nodes are required')
+            raise ValueError('Data was received from one node but at least two nodes are required')
 
-        data_operations, _ = OperationTypesRepository('data_operation').suitable_operation(task_type=task)
+        data_operations = OperationTypesRepository('data_operation').suitable_operation(task_type=task)
 
         # Which data operations was in pipeline before decompose operation
         previous_data_operation = None

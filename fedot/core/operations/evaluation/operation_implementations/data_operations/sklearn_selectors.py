@@ -5,16 +5,17 @@ from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
-from fedot.core.data.data import OutputData
+from fedot.core.data.data import InputData, OutputData
 from fedot.core.operations.evaluation.operation_implementations.implementation_interfaces import \
     DataOperationImplementation
+from fedot.core.operations.operation_parameters import OperationParameters
 
 
 class FeatureSelectionImplementation(DataOperationImplementation):
     """ Class for applying feature selection operations on tabular data """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters]):
+        super().__init__(params)
         self.inner_model = None
         self.operation = None
         self.is_not_fitted = None
@@ -25,7 +26,7 @@ class FeatureSelectionImplementation(DataOperationImplementation):
         # Bool mask where True - remain column and False - drop it
         self.remain_features_mask = None
 
-    def fit(self, input_data):
+    def fit(self, input_data: InputData):
         """ Method for fit feature selection
 
         :param input_data: data with features, target and ids to process
@@ -53,11 +54,10 @@ class FeatureSelectionImplementation(DataOperationImplementation):
             self.is_not_fitted = True
         return self.operation
 
-    def transform(self, input_data, is_fit_pipeline_stage: Optional[bool]):
-        """ Method for making prediction
+    def transform(self, input_data: InputData) -> OutputData:
+        """ Method for making prediction for prediction stage
 
         :param input_data: data with features, target and ids to process
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         :return output_data: filtered input data by columns
         """
         if self.is_not_fitted:
@@ -73,23 +73,18 @@ class FeatureSelectionImplementation(DataOperationImplementation):
         self._update_column_types(source_features_shape, output_data)
         return output_data
 
-    def get_params(self):
-        return self.operation.get_params()
-
     def _update_column_types(self, source_features_shape, output_data: OutputData):
         """ Update column types after applying feature selection operations """
         if len(source_features_shape) < 2:
             return output_data
-        else:
-            if self.features_columns_number > 1:
-                cols_number_removed = source_features_shape[1] - output_data.predict.shape[1]
-                if cols_number_removed > 0:
-                    # There are several columns, which were dropped
-                    col_types = output_data.supplementary_data.column_types['features']
+        if self.features_columns_number > 1:
+            cols_number_removed = source_features_shape[1] - output_data.predict.shape[1]
+            if cols_number_removed:
+                # There are several columns, which were dropped
+                feature_type_ids = output_data.supplementary_data.col_type_ids['features']
 
-                    # Calculate
-                    remained_column_types = np.array(col_types)[self.remain_features_mask]
-                    output_data.supplementary_data.column_types['features'] = list(remained_column_types)
+                # Calculate
+                output_data.supplementary_data.col_type_ids['features'] = feature_type_ids[self.remain_features_mask]
 
     def _make_new_table(self, features):
         """
@@ -102,7 +97,11 @@ class FeatureSelectionImplementation(DataOperationImplementation):
 
         # Bool vector - mask for columns
         self.remain_features_mask = self.operation.support_
-        transformed_features = features[:, self.remain_features_mask]
+        if isinstance(features, np.ndarray):
+            transformed_features = features[:, self.remain_features_mask]
+        else:
+            transformed_features = features.iloc[:, self.remain_features_mask]
+
         return transformed_features
 
     @staticmethod
@@ -118,19 +117,18 @@ class LinearRegFSImplementation(FeatureSelectionImplementation):
     Task type - regression
     """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
-        self.inner_model = LinearRegression(normalize=True)
+    def __init__(self, params: Optional[OperationParameters]):
+        super().__init__(params)
+        self.inner_model = LinearRegression()
 
-        if not params:
+        if not self.params:
             # Default parameters
             self.operation = RFE(estimator=self.inner_model)
         else:
             # Checking the appropriate params are using or not
-            rfe_params = {k: params[k] for k in
+            rfe_params = {k: self.params.get(k) for k in
                           ['n_features_to_select', 'step']}
             self.operation = RFE(estimator=self.inner_model, **rfe_params)
-        self.params = params
 
 
 class NonLinearRegFSImplementation(FeatureSelectionImplementation):
@@ -140,19 +138,18 @@ class NonLinearRegFSImplementation(FeatureSelectionImplementation):
     Task type - regression
     """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters]):
+        super().__init__(params)
         self.inner_model = DecisionTreeRegressor()
 
-        if not params:
+        if not self.params:
             # Default parameters
             self.operation = RFE(estimator=self.inner_model)
         else:
             # Checking the appropriate params are using or not
-            rfe_params = {k: params[k] for k in
+            rfe_params = {k: self.params.get(k) for k in
                           ['n_features_to_select', 'step']}
             self.operation = RFE(estimator=self.inner_model, **rfe_params)
-        self.params = params
 
 
 class LinearClassFSImplementation(FeatureSelectionImplementation):
@@ -162,19 +159,18 @@ class LinearClassFSImplementation(FeatureSelectionImplementation):
     Task type - classification
     """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters]):
+        super().__init__(params)
         self.inner_model = LogisticRegression()
 
-        if not params:
+        if not self.params:
             # Default parameters
             self.operation = RFE(estimator=self.inner_model)
         else:
             # Checking the appropriate params are using or not
-            rfe_params = {k: params[k] for k in
+            rfe_params = {k: self.params.get(k) for k in
                           ['n_features_to_select', 'step']}
             self.operation = RFE(estimator=self.inner_model, **rfe_params)
-        self.params = params
 
 
 class NonLinearClassFSImplementation(FeatureSelectionImplementation):
@@ -184,16 +180,15 @@ class NonLinearClassFSImplementation(FeatureSelectionImplementation):
     Task type - classification
     """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters]):
+        super().__init__(params)
         self.inner_model = DecisionTreeClassifier()
 
-        if not params:
+        if not self.params:
             # Default parameters
             self.operation = RFE(estimator=self.inner_model)
         else:
             # Checking the appropriate params are using or not
-            rfe_params = {k: params[k] for k in
+            rfe_params = {k: self.params.get(k) for k in
                           ['n_features_to_select', 'step']}
             self.operation = RFE(estimator=self.inner_model, **rfe_params)
-        self.params = params

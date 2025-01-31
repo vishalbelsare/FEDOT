@@ -3,20 +3,21 @@ from typing import Any, List
 
 import numpy as np
 import pandas as pd
+from golem.core.optimisers.genetic.gp_params import GPAlgorithmParameters
+from golem.core.optimisers.genetic.operators.mutation import MutationTypesEnum
+from fedot.core.pipelines.pipeline_composer_requirements import PipelineComposerRequirements
 from matplotlib import pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-from examples.simple.time_series_forecasting.ts_pipelines import *
+from examples.simple.time_series_forecasting.ts_pipelines import ts_complex_ridge_pipeline
 from fedot.core.composer.composer_builder import ComposerBuilder
-from fedot.core.composer.gp_composer.gp_composer import PipelineComposerRequirements
 from fedot.core.composer.gp_composer.specific_operators import parameter_change_mutation
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.optimisers.gp_comp.gp_optimiser import GPGraphOptimiserParameters
-from fedot.core.optimisers.gp_comp.operators.mutation import MutationTypesEnum
+from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
-from fedot.core.repository.quality_metrics_repository import \
-    MetricsRepository, RegressionMetricsEnum
+from fedot.core.repository.metrics_repository import \
+    RegressionMetricsEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
 from fedot.core.utils import fedot_project_root
 
@@ -89,23 +90,26 @@ def run_composing(dataset: str, pipeline: Pipeline, len_forecast=250):
     # Composer parameters
     composer_requirements = PipelineComposerRequirements(
         primary=primary_operations,
-        secondary=secondary_operations, max_arity=3,
-        max_depth=8, pop_size=10, num_of_generations=10,
-        crossover_prob=0.8, mutation_prob=0.8,
+        secondary=secondary_operations,
+        max_arity=3, max_depth=8,
+        num_of_generations=10,
         timeout=datetime.timedelta(minutes=10),
         cv_folds=2,
-        validation_blocks=2)
-
-    mutation_types = [parameter_change_mutation, MutationTypesEnum.growth, MutationTypesEnum.reduce,
-                      MutationTypesEnum.simple]
-    optimiser_parameters = GPGraphOptimiserParameters(mutation_types=mutation_types)
-
-    metric_function = MetricsRepository().metric_by_id(RegressionMetricsEnum.RMSE)
-    builder = ComposerBuilder(task=task). \
-        with_optimiser(parameters=optimiser_parameters). \
+    )
+    optimizer_parameters = GPAlgorithmParameters(
+        pop_size=10,
+        crossover_prob=0.8, mutation_prob=0.8,
+        mutation_types=[parameter_change_mutation,
+                        MutationTypesEnum.growth,
+                        MutationTypesEnum.reduce,
+                        MutationTypesEnum.simple]
+    )
+    composer = ComposerBuilder(task). \
         with_requirements(composer_requirements). \
-        with_metrics(metric_function).with_initial_pipelines([pipeline])
-    composer = builder.build()
+        with_optimizer_params(optimizer_parameters). \
+        with_metrics(RegressionMetricsEnum.RMSE). \
+        with_initial_pipelines([pipeline]). \
+        build()
 
     obtained_pipeline = composer.compose_pipeline(data=train_data)
 
@@ -149,20 +153,21 @@ def visualise(plot_info: List[dict]):
     plt.show()
 
 
-def get_border_line_info(idx: Any, predict: np.array, time_series: np.array, label: str) -> dict:
+def get_border_line_info(idx: Any, predict: np.array, time_series: np.array, label: str, color: str = 'black') -> dict:
     """
     Return plot_info for border vertical line that divides train and test part of data
 
     :param idx: idx for vertical line
     :param predict: predictions
     :param time_series: full time series with test_data
-    :param label: label for legend
+    :param label: label for a legend
+    :parma color: color of a line
     """
     return {'idx': [idx, idx],
             'series': [min(np.concatenate([np.ravel(time_series), predict])),
                        max(np.concatenate([np.ravel(time_series), predict]))],
             'label': label,
-            'color': 'black'}
+            'color': color}
 
 
 if __name__ == '__main__':

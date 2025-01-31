@@ -2,41 +2,45 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from golem.core.tuning.simultaneous import SimultaneousTuner
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 
-from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
 from fedot.core.data.data import InputData
+from fedot.core.pipelines.node import PipelineNode
+from fedot.core.pipelines.pipeline import Pipeline
+from fedot.core.pipelines.tuning.tuner_builder import TunerBuilder
 from fedot.core.repository.dataset_types import DataTypesEnum
+from fedot.core.repository.metrics_repository import RegressionMetricsEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
+from fedot.core.utils import fedot_project_root
 
 warnings.filterwarnings('ignore')
 
 
 def get_refinement_pipeline():
     """ Create five-level pipeline with decompose operation """
-    node_encoding = PrimaryNode('one_hot_encoding')
-    node_scaling = SecondaryNode('scaling', nodes_from=[node_encoding])
-    node_lasso = SecondaryNode('lasso', nodes_from=[node_scaling])
-    node_decompose = SecondaryNode('decompose', nodes_from=[node_scaling, node_lasso])
-    node_dtreg = SecondaryNode('dtreg', nodes_from=[node_decompose])
-    node_dtreg.custom_params = {'max_depth': 3}
-    final_node = SecondaryNode('ridge', nodes_from=[node_lasso, node_dtreg])
+    node_encoding = PipelineNode('one_hot_encoding')
+    node_scaling = PipelineNode('scaling', nodes_from=[node_encoding])
+    node_lasso = PipelineNode('lasso', nodes_from=[node_scaling])
+    node_decompose = PipelineNode('decompose', nodes_from=[node_scaling, node_lasso])
+    node_dtreg = PipelineNode('dtreg', nodes_from=[node_decompose])
+    node_dtreg.parameters = {'max_depth': 3}
+    final_node = PipelineNode('ridge', nodes_from=[node_lasso, node_dtreg])
 
     pipeline = Pipeline(final_node)
     return pipeline
 
 
 def get_non_refinement_pipeline():
-    node_encoding = PrimaryNode('one_hot_encoding')
-    node_scaling = SecondaryNode('scaling', nodes_from=[node_encoding])
+    node_encoding = PipelineNode('one_hot_encoding')
+    node_scaling = PipelineNode('scaling', nodes_from=[node_encoding])
 
-    node_lasso = SecondaryNode('lasso', nodes_from=[node_scaling])
-    node_dtreg = SecondaryNode('dtreg', nodes_from=[node_scaling])
-    node_dtreg.custom_params = {'max_depth': 3}
+    node_lasso = PipelineNode('lasso', nodes_from=[node_scaling])
+    node_dtreg = PipelineNode('dtreg', nodes_from=[node_scaling])
+    node_dtreg.parameters = {'max_depth': 3}
 
-    final_node = SecondaryNode('ridge', nodes_from=[node_lasso, node_dtreg])
+    final_node = PipelineNode('ridge', nodes_from=[node_lasso, node_dtreg])
 
     pipeline = Pipeline(final_node)
     return pipeline
@@ -91,19 +95,18 @@ def run_river_experiment(file_path, with_tuning=False):
     r_pipeline = get_refinement_pipeline()
     non_pipeline = get_non_refinement_pipeline()
 
+    if with_tuning:
+        tuner = TunerBuilder(task)\
+            .with_tuner(SimultaneousTuner)\
+            .with_metric(RegressionMetricsEnum.MAE)\
+            .with_iterations(100)\
+            .build(train_input)
+        r_pipeline = tuner.tune(r_pipeline)
+        non_pipeline = tuner.tune(non_pipeline)
+
     # Fit it
     r_pipeline.fit(train_input)
     non_pipeline.fit(train_input)
-
-    if with_tuning:
-        r_pipeline.fine_tune_all_nodes(loss_function=mean_absolute_error,
-                                       loss_params=None,
-                                       input_data=train_input,
-                                       iterations=100)
-        non_pipeline.fine_tune_all_nodes(loss_function=mean_absolute_error,
-                                         loss_params=None,
-                                         input_data=train_input,
-                                         iterations=100)
 
     # Predict
     predicted_values = r_pipeline.predict(predict_input)
@@ -127,5 +130,5 @@ def run_river_experiment(file_path, with_tuning=False):
 
 
 if __name__ == '__main__':
-    run_river_experiment(file_path='../../../cases/data/river_levels/station_levels.csv',
-                         with_tuning=False)
+    run_river_experiment(file_path=f'{fedot_project_root()}/examples/real_cases/data/river_levels/station_levels.csv',
+                         with_tuning=True)

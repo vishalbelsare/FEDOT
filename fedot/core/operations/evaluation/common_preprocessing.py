@@ -1,19 +1,44 @@
 import warnings
 from typing import Optional
 
-from fedot.core.data.data import InputData
+from fedot.core.data.data import InputData, OutputData
 from fedot.core.operations.evaluation.evaluation_interfaces import EvaluationStrategy
+from fedot.core.operations.evaluation.operation_implementations.data_operations.categorical_encoders import \
+    OneHotEncodingImplementation, LabelEncodingImplementation
 from fedot.core.operations.evaluation.operation_implementations.data_operations.sklearn_transformations import \
     ImputationImplementation, KernelPCAImplementation, NormalizationImplementation, PCAImplementation, \
     PolyFeaturesImplementation, ScalingImplementation, FastICAImplementation
-from fedot.core.operations.evaluation.operation_implementations.data_operations.categorical_encoders import \
-    OneHotEncodingImplementation, LabelEncodingImplementation
+from fedot.core.operations.evaluation.operation_implementations. \
+    data_operations.topological.fast_topological_extractor import \
+    TopologicalFeaturesImplementation
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.utilities.random import ImplementationRandomStateHandler
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
 class FedotPreprocessingStrategy(EvaluationStrategy):
-    __operations_by_types = {
+    """
+    Args:
+        operation_type: ``str`` of the operation defined in operation or data operation repositories
+
+            .. details:: possible operations:
+
+                - ``scaling``-> ScalingImplementation,
+                - ``normalization``-> NormalizationImplementation,
+                - ``simple_imputation``-> ImputationImplementation,
+                - ``pca``-> PCAImplementation,
+                - ``kernel_pca``-> KernelPCAImplementation,
+                - ``poly_features``-> PolyFeaturesImplementation,
+                - ``one_hot_encoding``-> OneHotEncodingImplementation,
+                - ``label_encoding``-> LabelEncodingImplementation,
+                - ``fast_ica``-> FastICAImplementation
+
+        params: hyperparameters to fit the operation with
+
+    """
+
+    _operations_by_types = {
         'scaling': ScalingImplementation,
         'normalization': NormalizationImplementation,
         'simple_imputation': ImputationImplementation,
@@ -22,47 +47,55 @@ class FedotPreprocessingStrategy(EvaluationStrategy):
         'poly_features': PolyFeaturesImplementation,
         'one_hot_encoding': OneHotEncodingImplementation,
         'label_encoding': LabelEncodingImplementation,
-        'fast_ica': FastICAImplementation
+        'fast_ica': FastICAImplementation,
+        'topological_features': TopologicalFeaturesImplementation
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
         super().__init__(operation_type, params)
 
     def fit(self, train_data: InputData):
-        """
-        This method is used for operation training with the data provided
-        :param InputData train_data: data used for operation training
-        :return: trained Sklearn operation
+        """This method is used for operation training with the data provided
+
+        Args:
+            train_data: data used for operation training
+
+        Returns:
+            trained Sklearn operation
         """
 
         warnings.filterwarnings("ignore", category=RuntimeWarning)
-        if self.params_for_fit:
-            operation_implementation = self.operation_impl(**self.params_for_fit)
-        else:
-            operation_implementation = self.operation_impl()
-
-        operation_implementation.fit(train_data)
+        operation_implementation = self.operation_impl(self.params_for_fit)
+        with ImplementationRandomStateHandler(implementation=operation_implementation):
+            operation_implementation.fit(train_data)
         return operation_implementation
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool):
-        """
-        Transform method for preprocessing task
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
+        """Transform method for preprocessing task
 
-        :param trained_operation: model object
-        :param predict_data: data used for prediction
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
-        :return:
+        Args:
+            trained_operation: model object
+            predict_data: data used for prediction
+
+        Returns:
+            prediction
         """
-        prediction = trained_operation.transform(predict_data,
-                                                 is_fit_pipeline_stage)
+        prediction = trained_operation.transform(predict_data)
         # Convert prediction to output (if it is required)
         converted = self._convert_to_output(prediction, predict_data)
         return converted
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain custom preprocessing strategy for {operation_type}')
+    def predict_for_fit(self, trained_operation, predict_data: InputData) -> OutputData:
+        """
+        Transform method for preprocessing task for fit stage
+
+        Args:
+            trained_operation: model object
+            predict_data: data used for prediction
+        Returns:
+            OutputData:
+        """
+        prediction = trained_operation.transform_for_fit(predict_data)
+        converted = self._convert_to_output(prediction, predict_data)
+        return converted

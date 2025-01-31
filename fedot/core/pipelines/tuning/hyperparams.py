@@ -1,31 +1,33 @@
 import random
 
+import numpy as np
+from golem.core.log import default_log
+from golem.core.tuning.hyperopt_tuner import get_parameter_hyperopt_space
 from hyperopt.pyll.stochastic import sample as hp_sample
 
-from fedot.core.log import default_log
-from fedot.core.pipelines.tuning.search_space import SearchSpace
+from fedot.core.pipelines.tuning.search_space import PipelineSearchSpace
 
 
 class ParametersChanger:
     """
     Class for the hyperparameters changing in the operation
 
-    :attribute operation_name: name of operation to get hyperparameters for
-    :attribute current_params: current parameters value
+    :param operation_name: name of operation to get hyperparameters for
+    :param current_params: current parameters value
     """
 
     def __init__(self, operation_name, current_params):
         self.operation_name = operation_name
         self.current_params = current_params
-        self.logger = default_log('ParametersChangerLog')
+        self.logger = default_log(prefix='ParametersChangerLog')
 
     def get_new_operation_params(self):
         """ Function return a dictionary with new parameters values """
 
         # Get available parameters for operation
-        params_list = SearchSpace().get_operation_parameter_range(self.operation_name)
+        params_list = PipelineSearchSpace().get_parameters_for_operation(self.operation_name)
 
-        if params_list is None:
+        if not params_list:
             params_dict = None
         else:
             # Get new values for all parameters
@@ -66,17 +68,11 @@ class ParametersChanger:
         return params_dict
 
     def _get_current_parameter_value(self, parameter_name):
-
-        if isinstance(self.current_params, str):
-            # TODO 'default_params' - need to process
+        try:
+            current_value = self.current_params.get(parameter_name)
+        except Exception as exec:
+            self.logger.warning(f'The following error occurred during the hyperparameter configuration.{exec}')
             current_value = None
-        else:
-            # Dictionary with parameters
-            try:
-                current_value = self.current_params.get(parameter_name)
-            except Exception as exec:
-                self.logger.warn(f'The following error occurred during the hyperparameter configuration.{exec}')
-                current_value = None
 
         return current_value
 
@@ -84,11 +80,18 @@ class ParametersChanger:
     def _random_change(parameter_name, **kwargs):
         """ Randomly selects a parameter value from a specified range """
 
-        space = SearchSpace().get_operation_parameter_range(operation_name=kwargs['operation_name'],
-                                                            parameter_name=parameter_name,
-                                                            label=parameter_name)
+        space = get_parameter_hyperopt_space(PipelineSearchSpace(),
+                                             operation_name=kwargs['operation_name'],
+                                             parameter_name=parameter_name,
+                                             label=parameter_name)
         # Randomly choose new value
-        new_value = hp_sample(space)
+        rng = np.random.default_rng(random.randint(0, np.iinfo(np.int32).max))
+        new_value = hp_sample(space, rng=rng)
+        if isinstance(new_value, np.ndarray) and new_value.size == 1:
+            if len(new_value.shape) == 0:
+                new_value = new_value.item()
+            else:
+                new_value = new_value[0]
         return {parameter_name: new_value}
 
     @staticmethod

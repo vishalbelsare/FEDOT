@@ -3,9 +3,8 @@ from typing import Union
 
 from sklearn.metrics import f1_score as f1
 
-from cases.dataset_preparation import unpack_archived_data
-from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from examples.real_cases.dataset_preparation import unpack_archived_data
+from fedot import Fedot
 from fedot.core.data.data import InputData, OutputData
 from fedot.core.data.data_split import train_test_data_setup
 from fedot.core.data.multi_modal import MultiModalData
@@ -42,6 +41,10 @@ def prepare_multi_modal_data(files_path: str, task: Task, images_size: tuple = (
     """
 
     path = os.path.join(str(fedot_project_root()), files_path)
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+
     # unpacking of data archive
     unpack_archived_data(path)
     # import of table data
@@ -69,72 +72,19 @@ def prepare_multi_modal_data(files_path: str, task: Task, images_size: tuple = (
     return data
 
 
-def generate_initial_pipeline_and_data(data: Union[InputData, MultiModalData],
-                                       with_split=True) -> tuple:
-    """
-    Generates initial pipeline for data from 3 different sources (table, images and text)
-    Each source is the primary node for its subpipeline
-
-    :param data: multimodal data (from 3 different sources: table, text, image)
-    :param with_split: if True, splits the sample on train/test
-    :return: pipeline object, 2 multimodal data objects (fit and predict)
-    """
-
-    # Identifying a number of classes for CNN params
-    if data.target.shape[1] > 1:
-        num_classes = data.target.shape[1]
-    else:
-        num_classes = data.num_classes
-    # image
-    images_size = data['data_source_img'].features.shape[1:4]
-    ds_image = PrimaryNode('data_source_img')
-    image_node = SecondaryNode('cnn', nodes_from=[ds_image])
-    image_node.custom_params = {'image_shape': images_size,
-                                'architecture_type': 'vgg16',
-                                'num_classes': num_classes,
-                                'epochs': 2,
-                                'batch_size': 16,
-                                'optimizer_parameters': {'loss': "binary_crossentropy",
-                                                         'optimizer': "adam",
-                                                         'metrics': 'categorical_crossentropy'}
-                                }
-
-    # table
-    ds_table = PrimaryNode('data_source_table')
-    numeric_node = SecondaryNode('scaling', nodes_from=[ds_table])
-
-    # text
-    ds_text = PrimaryNode('data_source_text')
-    node_text_clean = SecondaryNode('text_clean', nodes_from=[ds_text])
-    text_node = SecondaryNode('tfidf', nodes_from=[node_text_clean])
-    text_node.custom_params = {'ngram_range': (1, 3), 'min_df': 0.001, 'max_df': 0.9}
-
-    # combining all sources together
-    logit_node = SecondaryNode('logit', nodes_from=[image_node, numeric_node, text_node])
-    logit_node.custom_params = {'max_iter': 100000, 'random_state': 42}
-    pipeline = Pipeline(logit_node)
-
-    # train/test ratio
-    ratio = 0.6
-    if with_split:
-        fit_data, predict_data = train_test_data_setup(data, shuffle_flag=True, split_ratio=ratio)
-    else:
-        fit_data, predict_data = data, data
-
-    return pipeline, fit_data, predict_data
-
-
-def run_multi_modal_pipeline(files_path: str, is_visualise=False) -> float:
+def run_multi_modal_pipeline(files_path: str, timeout=15, visualization=False) -> float:
     task = Task(TaskTypesEnum.classification)
     images_size = (224, 224)
 
     data = prepare_multi_modal_data(files_path, task, images_size)
 
-    pipeline, fit_data, predict_data = generate_initial_pipeline_and_data(data, with_split=True)
+    fit_data, predict_data = train_test_data_setup(data, shuffle=True, split_ratio=0.6)
 
-    pipeline.fit(input_data=fit_data)
+    automl_model = Fedot(problem='classification', timeout=timeout)
+    pipeline = automl_model.fit(features=fit_data,
+                                target=fit_data.target)
 
-    if is_visualise:
+    if visualization:
         pipeline.show()
 
     prediction = pipeline.predict(predict_data, output_mode='labels')
@@ -147,4 +97,4 @@ def run_multi_modal_pipeline(files_path: str, is_visualise=False) -> float:
 
 
 if __name__ == '__main__':
-    run_multi_modal_pipeline(files_path='examples/data/multimodal', is_visualise=True)
+    run_multi_modal_pipeline(files_path='examples/data/multimodal', visualization=True)

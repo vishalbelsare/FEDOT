@@ -6,23 +6,18 @@ import pandas as pd
 import pytest
 from sklearn.datasets import load_iris
 
-from fedot.core.data.data import InputData, OutputData
-from fedot.core.data.multi_modal import MultiModalData
-from fedot.core.pipelines.node import PrimaryNode
+from fedot.core.data.data import InputData, get_df_from_csv
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
 from fedot.core.utils import fedot_project_root
-from test.unit.tasks.test_classification import get_image_classification_data
 from test.unit.tasks.test_forecasting import get_ts_data_with_dt_idx
 
 
 @pytest.fixture()
 def data_setup() -> InputData:
     predictors, response = load_iris(return_X_y=True)
-    np.random.seed(1)
-    np.random.shuffle(predictors)
-    np.random.shuffle(response)
     predictors = predictors[:100]
     response = response[:100]
     data = InputData(features=predictors, target=response, idx=np.arange(0, 100),
@@ -64,9 +59,14 @@ def test_data_from_csv():
                                   idx=idx,
                                   task=task,
                                   data_type=DataTypesEnum.table).features
-    actual_features = InputData.from_csv(
+    actual_features_from_csv = InputData.from_csv(
         os.path.join(test_file_path, file)).features
-    assert np.array_equal(expected_features, actual_features)
+    assert np.array_equal(expected_features, actual_features_from_csv)
+    df.set_index('ID', drop=True, inplace=True)
+    features = df[df.columns[:-1]]
+    target = df[df.columns[-1]]
+    actual_features_from_df = InputData.from_dataframe(features, target).features
+    assert np.array_equal(expected_features, actual_features_from_df)
 
 
 def test_with_custom_target():
@@ -99,14 +99,6 @@ def test_with_custom_target():
     assert np.array_equal(expected_target, actual_target)
 
 
-def test_data_from_image():
-    _, _, dataset_to_validate = get_image_classification_data()
-
-    assert dataset_to_validate.data_type == DataTypesEnum.image
-    assert type(dataset_to_validate.features) == np.ndarray
-    assert type(dataset_to_validate.target) == np.ndarray
-
-
 def test_data_from_json():
     # several features
     files_path = os.path.join('test', 'data', 'multi_modal')
@@ -121,36 +113,6 @@ def test_data_from_json():
                                      label='rating', task=Task(TaskTypesEnum.regression))
     assert len(data.features.shape) == 1  # check there is one feature
     assert len(data.target) == len(data.features) == len(data.idx)
-
-
-def test_multi_modal_data():
-    num_samples = 5
-    target = np.asarray([0, 0, 1, 0, 1])
-    img_data = InputData(idx=range(num_samples),
-                         features=None,  # in test the real data is not passed
-                         target=target,
-                         data_type=DataTypesEnum.text,
-                         task=Task(TaskTypesEnum.classification))
-    tbl_data = InputData(idx=range(num_samples),
-                         features=None,  # in test the real data is not passed
-                         target=target,
-                         data_type=DataTypesEnum.table,
-                         task=Task(TaskTypesEnum.classification))
-
-    multi_modal = MultiModalData({
-        'data_source_img': img_data,
-        'data_source_table': tbl_data,
-    })
-
-    assert multi_modal.task.task_type == TaskTypesEnum.classification
-    assert len(multi_modal.idx) == 5
-    assert multi_modal.num_classes == 2
-    assert np.array_equal(multi_modal.target, target)
-
-    # check setter
-    new_target = np.asarray([1, 1, 1, 1, 1])
-    multi_modal.target = new_target
-    assert np.array_equal(multi_modal.target, new_target)
 
 
 def test_target_data_from_csv_correct():
@@ -204,7 +166,7 @@ def test_data_convert_string_indexes_correct():
     old_train_pred_data_idx = copy(train_pred_data.idx)
     old_test_data_idx = copy(test_data.idx)
     # pipeline object need to save last_fit_idx
-    dummy_pipeline = Pipeline(PrimaryNode("сut"))
+    dummy_pipeline = Pipeline(PipelineNode("сut"))
     train_data = train_data.convert_non_int_indexes_for_fit(dummy_pipeline)
     train_pred_data = train_pred_data.convert_non_int_indexes_for_predict(dummy_pipeline)
     test_data = test_data.convert_non_int_indexes_for_predict(dummy_pipeline)
@@ -227,7 +189,7 @@ def test_data_convert_dt_indexes_correct():
     old_train_pred_data_idx = copy(train_pred_data.idx)
     old_test_data_idx = copy(test_data.idx)
     # pipeline object need to save last_fit_idx
-    dummy_pipeline = Pipeline(PrimaryNode("сut"))
+    dummy_pipeline = Pipeline(PipelineNode("сut"))
     train_data = train_data.convert_non_int_indexes_for_fit(dummy_pipeline)
     train_pred_data = train_pred_data.convert_non_int_indexes_for_predict(dummy_pipeline)
     test_data = test_data.convert_non_int_indexes_for_predict(dummy_pipeline)
@@ -238,3 +200,38 @@ def test_data_convert_dt_indexes_correct():
     assert np.all(train_data.supplementary_data.non_int_idx == old_train_data_idx)
     assert np.all(train_pred_data.supplementary_data.non_int_idx == old_train_pred_data_idx)
     assert np.all(test_data.supplementary_data.non_int_idx == old_test_data_idx)
+
+
+@pytest.mark.parametrize('columns_to_use, possible_idx_keywords',
+                         [
+                             (None, ['b', 'c', 'a', 'some']),
+                             (['b', 'c'], ['a', 'some'])
+                         ])
+def test_define_index_from_csv_with_first_index_column(columns_to_use, possible_idx_keywords):
+    dummy_csv_path = fedot_project_root().joinpath('test/data/dummy.csv')
+    df = get_df_from_csv(dummy_csv_path, delimiter=',',
+                         columns_to_use=columns_to_use, possible_idx_keywords=possible_idx_keywords)
+    assert df.index.name == 'a'
+    assert np.array_equal(df.index, [1, 2, 3])
+    assert np.array_equal(df.columns, ['b', 'c'])
+    assert np.array_equal(df, list(zip([4, 5, 6], [7, 8, 9])))
+
+
+def test_define_index_from_csv_with_non_first_index_column():
+    dummy_csv_path = fedot_project_root().joinpath('test/data/dummy.csv')
+    df = get_df_from_csv(dummy_csv_path, delimiter=',', columns_to_use=['b', 'c'],
+                         possible_idx_keywords=['a', 'b', 'c', 'some'])
+    assert df.index.name == 'b'
+    assert np.array_equal(df.index, [4, 5, 6])
+    assert np.array_equal(df.columns, ['c'])
+    assert np.array_equal(df, [[7], [8], [9]])
+
+
+def test_define_index_from_csv_without_index_column():
+    dummy_csv_path = fedot_project_root().joinpath('test/data/dummy.csv')
+    df = get_df_from_csv(dummy_csv_path, delimiter=',',
+                         possible_idx_keywords=['some'])
+    assert df.index.name is None
+    assert np.array_equal(df.index, [0, 1, 2])
+    assert np.array_equal(df.columns, ['a', 'b', 'c'])
+    assert np.array_equal(df, list(zip([1, 2, 3], [4, 5, 6], [7, 8, 9])))

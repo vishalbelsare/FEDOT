@@ -1,18 +1,9 @@
-import os
-import random
-
-import numpy as np
-import pandas as pd
-
-from cases.industrial.processing import multi_automl_fit_forecast, plot_diesel_and_wind, plot_results
-from fedot.core.data.multi_modal import prepare_multimodal_data
+from fedot import Fedot
+from fedot.core.data.multi_modal import MultiModalData
 from fedot.core.utils import fedot_project_root
-from fedot.remote.infrastructure.clients.datamall_client import DEFAULT_CONNECT_PARAMS, DEFAULT_EXEC_PARAMS, \
-    DataMallClient
+from fedot.core.utils import set_random_seed
+from fedot.remote.infrastructure.clients.test_client import TestClient
 from fedot.remote.remote_evaluator import RemoteEvaluator, RemoteTaskParams
-
-random.seed(1)
-np.random.seed(1)
 
 
 # WARNING - THIS SCRIPT CAN BE EVALUATED ONLY WITH THE ACCESS TO DATAMALL SYSTEM
@@ -24,24 +15,35 @@ def clip_dataframe(df, forecast_horizon, history_size):
     return dataframe_cutted
 
 
-def run_automl(df: pd.DataFrame, features_to_use: list, target_series: str,
+def run_automl(data: MultiModalData, features_to_use,
                forecast_horizon: int = 10, history_size: int = 397,
                timeout: int = 1):
     """ Launch AutoML FEDOT algorithm for time series forecasting task """
 
-    folder = os.path.join(fedot_project_root(), 'cases', 'industrial')
+    metocean_folder = fedot_project_root().joinpath('examples', 'real_cases', 'data', 'metocean')
 
-    connect_params = DEFAULT_CONNECT_PARAMS
-    exec_params = DEFAULT_EXEC_PARAMS
-
-    client = DataMallClient(connect_params, exec_params, output_path=os.path.join(folder, 'remote'))
+    connect_params = {}
+    exec_params = {
+        'container_input_path': metocean_folder,
+        'container_output_path': metocean_folder.joinpath('remote'),
+        'container_config_path': metocean_folder.joinpath('metocean', '.'),
+        'container_image': "test",
+        'timeout': 1
+    }
+    client = TestClient(connect_params, exec_params, output_path=metocean_folder.joinpath('remote'))
 
     remote_task_params = RemoteTaskParams(
         mode='remote',
-        dataset_name='pw_dataset',
+        dataset_name='metocean_data_train',
         max_parallel=20,
-        var_names=features_to_use
+        var_names=features_to_use,
+        target='sea_height'
     )
+
+    # the following client and params can be used with DataMall system
+    # connect_params = DEFAULT_CONNECT_PARAMS
+    # exec_params = DEFAULT_EXEC_PARAMS
+    # DataMallClient(connect_params, exec_params, output_path=os.path.join(folder, 'remote'))
 
     evaluator = RemoteEvaluator()
     evaluator.init(
@@ -49,12 +51,6 @@ def run_automl(df: pd.DataFrame, features_to_use: list, target_series: str,
         remote_task_params=remote_task_params
     )
 
-    dataframe_cutted = clip_dataframe(df, forecast_horizon, history_size)
-
-    ts = np.array(dataframe_cutted[target_series])
-    mm_train, mm_test, = prepare_multimodal_data(dataframe=dataframe_cutted,
-                                                 features=features_to_use,
-                                                 forecast_length=forecast_horizon)
     # Prepare parameters for algorithm launch
     composer_params = {'max_depth': 6,
                        'max_arity': 3,
@@ -62,55 +58,29 @@ def run_automl(df: pd.DataFrame, features_to_use: list, target_series: str,
                        'num_of_generations': 100,
                        'preset': 'fast_train',
                        'metric': 'rmse',
-                       'cv_folds': None,
-                       'validation_blocks': None}
-    forecast, obtained_pipeline = multi_automl_fit_forecast(mm_train, mm_test,
-                                                            timeout, composer_params,
-                                                            ts, forecast_horizon,
-                                                            vis=False)
+                       'cv_folds': None}
 
+    automl = Fedot(problem='ts_forecasting', timeout=timeout, **composer_params)
+
+    obtained_pipeline = automl.fit(data)
+    forecast = automl.forecast(data)
     return forecast, obtained_pipeline
 
 
-def plot_automl_forecast(df, forecast_horizon, history_size, forecast):
-    dataframe_cutted = clip_dataframe(df, forecast_horizon, history_size)
-    ts = np.array(dataframe_cutted[target_series])
+if __name__ == '__main__':
+    set_random_seed(1)
 
-    # Visualise predictions
-    plot_results(actual_time_series=ts,
-                 predicted_values=forecast,
-                 len_train_data=len(ts) - forecast_horizon)
+    features_to_use = ['wind_speed', 'sea_height']
 
+    data = MultiModalData.from_csv_time_series(
+        file_path=fedot_project_root().joinpath('examples/real_cases/data/metocean/metocean_data_train.csv'),
+        columns_to_use=features_to_use,
+        target_column='sea_height',
+        index_col='datetime')
 
-df = pd.read_csv('../../../cases/industrial/pw_dataset.csv', parse_dates=['datetime'])
+    forecast, obtained_pipeline = run_automl(data=data, features_to_use=['wind_speed', 'sea_height'],
+                                             forecast_horizon=30,
+                                             history_size=200,
+                                             timeout=5)
 
-# Make visualisation
-plot_diesel_and_wind(df)
-
-features_to_use = ['wind_power_kWh', 'diesel_time_h', 'wind_time_h',
-                   'velocity_max_msec', 'velocity_mean_msec', 'tmp_grad',
-                   'diesel_fuel_kWh']
-target_series = 'diesel_fuel_kWh'
-
-forecast, obtained_pipeline = run_automl(df=df, features_to_use=features_to_use,
-                                         target_series=target_series,
-                                         forecast_horizon=30,
-                                         history_size=200,
-                                         timeout=1)
-
-obtained_pipeline.show()
-
-plot_automl_forecast(df, forecast_horizon=30, history_size=200, forecast=forecast)
-
-forecast_horizon = 60
-history_size = 300
-timeout = 2
-forecast, obtained_pipeline = run_automl(df=df, features_to_use=features_to_use,
-                                         target_series=target_series,
-                                         forecast_horizon=forecast_horizon,
-                                         history_size=history_size,
-                                         timeout=timeout)
-
-obtained_pipeline.show()
-
-plot_automl_forecast(df, forecast_horizon, history_size, forecast=forecast)
+    obtained_pipeline.show()

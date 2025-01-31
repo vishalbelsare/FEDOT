@@ -3,8 +3,8 @@ from abc import abstractmethod
 from typing import Optional
 
 import numpy as np
-from catboost import CatBoostClassifier, CatBoostRegressor
-from lightgbm import LGBMClassifier, LGBMRegressor
+from golem.core.log import default_log
+from lightgbm.sklearn import LGBMClassifier, LGBMRegressor
 from sklearn.cluster import KMeans as SklearnKmeans
 from sklearn.ensemble import (
     AdaBoostRegressor,
@@ -28,31 +28,31 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from xgboost import XGBClassifier, XGBRegressor
 
 from fedot.core.data.data import InputData, OutputData
-from fedot.core.log import Log, default_log
+from fedot.core.operations.operation_parameters import OperationParameters
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.operation_types_repository import OperationTypesRepository, get_operation_type_from_id
 from fedot.core.repository.tasks import TaskTypesEnum
+from fedot.utilities.custom_errors import AbstractMethodNotImplementError
+from fedot.utilities.random import ImplementationRandomStateHandler
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
 class EvaluationStrategy:
-    """
-    Base class to define the evaluation strategy of Operation object:
+    """Base class to define the evaluation strategy of Operation object:
     the certain sklearn or any other operation with fit/predict methods.
-    :param operation_type: str type of the operation defined in operation repository
-    :param dict params: hyperparameters to fit the operation with
-    :param Log log: Log object to record messages
+
+    Args:
+        operation_type: ``str`` of the operation defined in operation repository
+        params: hyperparameters to fit the operation with
     """
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None,
-                 log: Optional[Log] = None):
-        self.params_for_fit = params
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
+        self.params_for_fit = params or OperationParameters()
         self.operation_id = operation_type
-
         self.output_mode = False
 
-        self.log = log or default_log(__name__)
+        self.log = default_log(self)
 
     @property
     def operation_type(self):
@@ -60,28 +60,47 @@ class EvaluationStrategy:
 
     @abstractmethod
     def fit(self, train_data: InputData):
+        """Main method to train the operation with the data provided
+
+        Args:
+            train_data: data used for operation training
+
+        Returns:
+
         """
-        Main method to train the operation with the data provided
-        :param InputData train_data: data used for operation training
-        :return:
-        """
-        raise NotImplementedError()
+        raise AbstractMethodNotImplementError(self.__class__)
 
     @abstractmethod
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool) -> OutputData:
-        """
-        Main method to predict the target data.
-        :param trained_operation: trained operation object
-        :param InputData predict_data: data to predict
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
-        :return OutputData: passed data with new predicted target
-        """
-        raise NotImplementedError()
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
+        """Method to predict the target data for predict stage.
 
-    @abstractmethod
+        Args:
+            trained_operation: trained operation object
+            predict_data: data to predict
+
+        Returns:
+            passed data with new predicted target
+        """
+        raise AbstractMethodNotImplementError
+
+    def predict_for_fit(self, trained_operation, predict_data: InputData) -> OutputData:
+        """Method to predict the target data for fit stage.
+        Allows to implement predict method different from main predict method
+        if another behaviour for fit graph stage is needed.
+
+        Args:
+            trained_operation: trained operation object
+            predict_data: data to predict
+        Returns:
+            passed data with new predicted target
+        """
+        return self.predict(trained_operation, predict_data)
+
     def _convert_to_operation(self, operation_type: str):
-        raise NotImplementedError()
+        if operation_type in self._operations_by_types:
+            return self._operations_by_types[operation_type]
+        else:
+            raise ValueError(f'Impossible to obtain {self.__class__} strategy for {operation_type}')
 
     @property
     def implementation_info(self) -> str:
@@ -90,16 +109,17 @@ class EvaluationStrategy:
     @staticmethod
     def _convert_to_output(prediction, predict_data: InputData,
                            output_data_type: DataTypesEnum = DataTypesEnum.table) -> OutputData:
-        """ Method convert prediction into OutputData if it is not this type yet
+        """Method convert prediction into :obj:`OutputData` if it is not this type yet
 
-        :param prediction: output from model implementation
-        :param predict_data: InputData used for prediction
-        :param output_data_type: DataTypesEnum for output
+        Args:
+            prediction: output from model implementation
+            predict_data: :obj:`InputData` used for prediction
+            output_data_type: :obj:`DataTypesEnum` for output
 
-        :return : prediction as OutputData
+        Returns: prediction as :obj:`OutputData`
         """
 
-        if type(prediction) is not OutputData:
+        if not isinstance(prediction, OutputData):
             # Wrap prediction as OutputData
             converted = OutputData(idx=predict_data.idx,
                                    features=predict_data.features,
@@ -115,14 +135,41 @@ class EvaluationStrategy:
 
 
 class SkLearnEvaluationStrategy(EvaluationStrategy):
-    """
-    This class defines the certain operation implementation for the sklearn operations
+    """This class defines the certain operation implementation for the sklearn operations
     defined in operation repository
-    :param str operation_type: str type of the operation defined in operation or
-    data operation repositories
-    :param dict params: hyperparameters to fit the operation with
+
+    Args:
+        operation_type: ``str`` of the operation defined in operation or
+            data operation repositories
+
+            .. details:: possible operations:
+
+                - ``xgbreg``-> XGBRegressor
+                - ``adareg``-> AdaBoostRegressor
+                - ``gbr``-> GradientBoostingRegressor
+                - ``dtreg``-> DecisionTreeRegressor
+                - ``treg``-> ExtraTreesRegressor
+                - ``rfr``-> RandomForestRegressor
+                - ``linear``-> SklearnLinReg
+                - ``ridge``-> SklearnRidgeReg
+                - ``lasso``-> SklearnLassoReg
+                - ``svr``-> SklearnSVR
+                - ``sgdr``-> SklearnSGD
+                - ``lgbmreg``-> LGBMRegressor
+                - ``xgboost``-> XGBClassifier
+                - ``logit``-> SklearnLogReg
+                - ``bernb``-> SklearnBernoulliNB
+                - ``multinb``-> SklearnMultinomialNB
+                - ``dt``-> DecisionTreeClassifier
+                - ``rf``-> RandomForestClassifier
+                - ``mlp``-> MLPClassifier
+                - ``lgbm``-> LGBMClassifier
+                - ``kmeans``-> SklearnKmeans
+
+        params: hyperparameters to fit the operation with
     """
-    __operations_by_types = {
+
+    _operations_by_types = {
         'xgbreg': XGBRegressor,
         'adareg': AdaBoostRegressor,
         'gbr': GradientBoostingRegressor,
@@ -135,7 +182,6 @@ class SkLearnEvaluationStrategy(EvaluationStrategy):
         'svr': SklearnSVR,
         'sgdr': SklearnSGD,
         'lgbmreg': LGBMRegressor,
-        'catboostreg': CatBoostRegressor,
 
         'xgboost': XGBClassifier,
         'logit': SklearnLogReg,
@@ -145,65 +191,61 @@ class SkLearnEvaluationStrategy(EvaluationStrategy):
         'rf': RandomForestClassifier,
         'mlp': MLPClassifier,
         'lgbm': LGBMClassifier,
-        'catboost': CatBoostClassifier,
 
         'kmeans': SklearnKmeans,
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
-        self.operation_id = operation_type
         super().__init__(operation_type, params)
 
     def fit(self, train_data: InputData):
+        """This method is used for operation training with the data provided
+
+        Args:
+            train_data: data used for operation training
+
+        Returns:
+            trained Sklearn operation
         """
-        This method is used for operation training with the data provided
-        :param InputData train_data: data used for operation training
-        :return: trained Sklearn operation
-        """
+
         warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-        if self.params_for_fit:
-            operation_implementation = self.operation_impl(**self.params_for_fit)
-        else:
-            operation_implementation = self.operation_impl()
+        operation_implementation = self.operation_impl(**self.params_for_fit.to_dict())
 
         # If model doesn't support multi-output and current task is ts_forecasting
         current_task = train_data.task.task_type
         models_repo = OperationTypesRepository()
-        non_multi_models, _ = models_repo.suitable_operation(task_type=current_task,
-                                                             tags=['non_multi'])
+        non_multi_models = models_repo.suitable_operation(task_type=current_task,
+                                                          tags=['non_multi'])
         is_model_not_support_multi = self.operation_type in non_multi_models
 
         # Multi-output task or not
         is_multi_target = is_multi_output_task(train_data)
-        if is_model_not_support_multi and is_multi_target:
-            # Manually wrap the regressor into multi-output model
-            operation_implementation = convert_to_multivariate_model(operation_implementation,
-                                                                     train_data)
-        else:
-            operation_implementation.fit(train_data.features, train_data.target)
+        with ImplementationRandomStateHandler(implementation=operation_implementation):
+            if is_model_not_support_multi and is_multi_target:
+                # Manually wrap the regressor into multi-output model
+                operation_implementation = convert_to_multivariate_model(operation_implementation, train_data)
+            else:
+                operation_implementation.fit(train_data.features, train_data.target)
+
         return operation_implementation
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool) -> OutputData:
-        """
-        This method used for prediction of the target data.
-        :param trained_operation: operation object
-        :param predict_data: data to predict
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
-        :return OutputData: passed data with new predicted target
-        """
-        raise NotImplementedError()
+    @abstractmethod
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
+        """This method used for prediction of the target data
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain SKlearn strategy for {operation_type}')
+        Args:
+            trained_operation: operation object
+            predict_data: data to predict
+
+        Returns:
+            passed data with new predicted target
+        """
+        raise AbstractMethodNotImplementError
 
     def _find_operation_by_impl(self, impl):
-        for operation, operation_impl in self.__operations_by_types.items():
+        for operation, operation_impl in self._operations_by_types.items():
             if operation_impl == impl:
                 return operation
 
@@ -223,7 +265,7 @@ class SkLearnEvaluationStrategy(EvaluationStrategy):
         elif self.output_mode in ['probs', 'full_probs', 'default']:
             prediction = trained_operation.predict_proba(features)
             if n_classes < 2:
-                raise NotImplementedError()
+                raise ValueError('Data set contain only 1 target class. Please reformat your data.')
             elif n_classes == 2 and self.output_mode != 'full_probs':
                 if is_multi_output_target:
                     prediction = np.stack([pred[:, 1] for pred in prediction]).T
@@ -236,13 +278,14 @@ class SkLearnEvaluationStrategy(EvaluationStrategy):
 
 
 def convert_to_multivariate_model(sklearn_model, train_data: InputData):
-    """
-    The function returns an iterator for multiple target for those models for
+    """The function returns an iterator for multiple target for those models for
     which such a function is not initially provided
 
-    :param sklearn_model: Sklearn model to train
-    :param train_data: data used for model training
-    :return : wrapped Sklearn model
+    Args:
+        sklearn_model: :obj:`Sklearn model` to train
+        train_data: data used for model training
+    Returns:
+        wrapped :obj:`Sklearn model`
     """
 
     if train_data.task.task_type == TaskTypesEnum.classification:
@@ -259,6 +302,7 @@ def convert_to_multivariate_model(sklearn_model, train_data: InputData):
 
 
 def is_multi_output_task(train_data):
-    target_shape = train_data.target.shape
-    is_multi_target = len(target_shape) > 1 and target_shape[1] > 1
-    return is_multi_target
+    if train_data.target is not None:
+        target_shape = train_data.target.shape
+        is_multi_target = len(target_shape) > 1 and target_shape[1] > 1
+        return is_multi_target

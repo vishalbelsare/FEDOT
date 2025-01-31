@@ -1,12 +1,21 @@
+from __future__ import annotations
+
 import glob
 import os
 from copy import copy, deepcopy
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
-import cv2
 import numpy as np
 import pandas as pd
+from golem.core.log import default_log
+from golem.utilities.requirements_notificator import warn_requirement
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    warn_requirement('opencv-python', 'fedot[extra]')
+    cv2 = None
 
 from fedot.core.data.array_utilities import atleast_2d
 from fedot.core.data.load_data import JSONBatchLoader, TextBatchLoader
@@ -14,59 +23,269 @@ from fedot.core.data.supplementary_data import SupplementaryData
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
 
+#: The list of keyword for auto-detecting csv *tabular* data index. Used in :py:meth:`Data.from_csv`
+#: and :py:meth:`MultiModalData.from_csv`.
+POSSIBLE_TABULAR_IDX_KEYWORDS = ['idx', 'index', 'id', 'unnamed: 0']
+#: The list of keyword for auto-detecting csv *time-series* data index. Used in :py:meth:`Data.from_csv_time_series`,
+#: :py:meth:`Data.from_csv_multi_time_series` and :py:meth:`MultiModalData.from_csv_time_series`.
+POSSIBLE_TS_IDX_KEYWORDS = ['datetime', 'date', 'time', 'unnamed: 0']
+
+PathType = Union[os.PathLike, str]
+
 
 @dataclass
 class Data:
     """
     Base Data type class
     """
-    idx: np.array
-    features: np.array
+
+    idx: np.ndarray
     task: Task
     data_type: DataTypesEnum
-    target: Optional[np.array] = None
+    features: Union[np.ndarray, pd.DataFrame]
+    categorical_features: Optional[np.ndarray] = None
+    categorical_idx: Optional[np.ndarray] = None
+    numerical_idx: Optional[np.ndarray] = None
+    encoded_idx: Optional[np.ndarray] = None
+    features_names: Optional[np.ndarray[str]] = None
+    target: Optional[np.ndarray] = None
 
     # Object with supplementary info
     supplementary_data: SupplementaryData = field(default_factory=SupplementaryData)
 
-    @staticmethod
-    def from_csv(file_path=None,
-                 delimiter=',',
-                 task: Task = Task(TaskTypesEnum.classification),
+    @classmethod
+    def from_numpy(cls,
+                   features_array: np.ndarray,
+                   target_array: np.ndarray,
+                   features_names: np.ndarray[str] = None,
+                   categorical_idx: Union[list[int, str], np.ndarray[int, str]] = None,
+                   idx: Optional[np.ndarray] = None,
+                   task: Union[Task, str] = 'classification',
+                   data_type: Optional[DataTypesEnum] = DataTypesEnum.table) -> InputData:
+        """Import data from numpy array.
+
+        Args:
+            features_array: numpy array with features.
+            target_array: numpy array with target.
+            features_names: numpy array with names of features
+            categorical_idx: a list or numpy array with indexes or names of features (if provided feature_names)
+                that indicate that the feature is categorical.
+            idx: indices of arrays.
+            task: the :obj:`Task` to solve with the data.
+            data_type: the type of the data. Possible values are listed at :class:`DataTypesEnum`.
+
+        Returns:
+            data: :InputData: representation of data in an internal data structure.
+        """
+        if isinstance(task, str):
+            task = Task(TaskTypesEnum(task))
+        return array_to_input_data(features_array, target_array, features_names, categorical_idx, idx, task, data_type)
+
+    @classmethod
+    def from_numpy_time_series(cls,
+                               features_array: np.ndarray,
+                               target_array: Optional[np.ndarray] = None,
+                               idx: Optional[np.ndarray] = None,
+                               task: Union[Task, str] = 'ts_forecasting',
+                               data_type: Optional[DataTypesEnum] = DataTypesEnum.ts) -> InputData:
+        """Import time series from numpy array.
+
+        Args:
+            features_array: numpy array with features time series.
+            target_array: numpy array with target time series (if None same as features).
+            idx: indices of arrays.
+            task: the :obj:`Task` to solve with the data.
+            data_type: the type of the data. Possible values are listed at :class:`DataTypesEnum`.
+
+        Returns:
+            data: :InputData: representation of data in an internal data structure.
+        """
+        if isinstance(task, str):
+            task = Task(TaskTypesEnum(task))
+        if target_array is None:
+            target_array = features_array
+        return array_to_input_data(features_array, target_array, idx, task, data_type)
+
+    @classmethod
+    def from_dataframe(cls,
+                       features_df: Union[pd.DataFrame, pd.Series],
+                       target_df: Union[pd.DataFrame, pd.Series],
+                       categorical_idx: Union[list[int, str], np.ndarray[int, str]] = None,
+                       task: Union[Task, str] = 'classification',
+                       data_type: DataTypesEnum = DataTypesEnum.table) -> InputData:
+        """Import data from pandas DataFrame.
+
+        Args:
+            features_df: loaded pandas DataFrame or Series with features.
+            target_df: loaded pandas DataFrame or Series with target.
+            categorical_idx: a list or numpy array with indexes or names of features that indicate that
+                the feature is categorical.
+            task: the :obj:`Task` to solve with the data.
+            data_type: the type of the data. Possible values are listed at :class:`DataTypesEnum`.
+
+        Returns:
+            data: :InputData: representation of data in an internal data structure.
+        """
+
+        if isinstance(task, str):
+            task = Task(TaskTypesEnum(task))
+        if isinstance(features_df, pd.Series):
+            features_df = pd.DataFrame(features_df)
+        if isinstance(target_df, pd.Series):
+            target_df = pd.DataFrame(target_df)
+
+        idx = features_df.index.to_numpy()
+        target_columns = target_df.columns.to_list()
+        features_names = features_df.columns.to_numpy()
+        df = pd.concat([features_df, target_df], axis=1)
+        features, target = process_target_and_features(df, target_columns)
+
+        categorical_features = None
+        if categorical_idx is not None:
+            if isinstance(categorical_idx, list):
+                categorical_idx = np.array(categorical_idx)
+
+            if categorical_idx.size != 0 and isinstance(categorical_idx[0], str) and features_names is None:
+                raise ValueError(
+                    'Impossible to specify categorical features by name when the features_names are not specified'
+                )
+
+            if categorical_idx.size != 0 and isinstance(categorical_idx[0], str):
+                categorical_idx = np.array(
+                    [idx for idx, column in enumerate(features_names) if column in set(categorical_idx)]
+                )
+
+            if categorical_idx.size != 0:
+                categorical_features = features[:, categorical_idx]
+
+        data = InputData(
+            idx=idx,
+            features=features,
+            target=target,
+            task=task,
+            data_type=data_type,
+            features_names=features_names,
+            categorical_idx=categorical_idx,
+            categorical_features=categorical_features
+        )
+
+        return data
+
+    @classmethod
+    def from_csv(cls,
+                 file_path: PathType,
+                 delimiter: str = ',',
+                 task: Union[Task, str] = 'classification',
                  data_type: DataTypesEnum = DataTypesEnum.table,
-                 columns_to_drop: Optional[List] = None,
-                 target_columns: Union[str, List] = '',
-                 index_col: Optional[Union[str, int]] = 0):
+                 columns_to_drop: Optional[List[Union[str, int]]] = None,
+                 target_columns: Union[str, List[Union[str, int]], None] = '',
+                 categorical_idx: Union[list[int, str], np.ndarray[int, str]] = None,
+                 index_col: Optional[Union[str, int]] = None,
+                 possible_idx_keywords: Optional[List[str]] = None) -> InputData:
+        """Import data from ``csv``.
+
+        Args:
+            file_path: the path to the ``CSV`` with data.
+            columns_to_drop: the names of columns that should be dropped.
+            delimiter: the delimiter to separate the columns.
+            task: the :obj:`Task` to solve with the data.
+            data_type: the type of the data. Possible values are listed at :class:`DataTypesEnum`.
+            target_columns: name of the target column (the last column if empty and no target if ``None``).
+            categorical_idx: a list or numpy array with indexes or names of features that indicate that
+                the feature is categorical.
+            index_col: name or index of the column to use as the :obj:`Data.idx`.\n
+                If ``None``, then check the first column's name and use it as index if succeeded
+                (see the param ``possible_idx_keywords``).\n
+                Set ``False`` to skip the check and rearrange a new integer index.
+            possible_idx_keywords: lowercase keys to find. If the first data column contains one of the keys,
+                it is used as index. See the :const:`POSSIBLE_TABULAR_IDX_KEYWORDS` for the list of default keywords.
+
+        Returns:
+            data
         """
-        :param file_path: the path to the CSV with data
-        :param columns_to_drop: the names of columns that should be dropped
-        :param delimiter: the delimiter to separate the columns
-        :param task: the task that should be solved with data
-        :param data_type: the type of data interpretation
-        :param target_columns: name of target column (last column if empty and no target if None)
-        :param index_col: column name or index to use as the Data.idx;
-            if None then arrange new unique index
-        :return:
+        possible_idx_keywords = possible_idx_keywords or POSSIBLE_TABULAR_IDX_KEYWORDS
+        if isinstance(task, str):
+            task = Task(TaskTypesEnum(task))
+
+        df = get_df_from_csv(file_path, delimiter, index_col, possible_idx_keywords, columns_to_drop=columns_to_drop)
+        idx = df.index.to_numpy()
+
+        if target_columns:
+            features_names = df.drop(target_columns, axis=1).columns.to_numpy()
+
+        else:
+            features_names = df.columns.to_numpy()
+
+        features, target = process_target_and_features(df, target_columns)
+
+        categorical_features = None
+        if categorical_idx is not None:
+            if isinstance(categorical_idx, list):
+                categorical_idx = np.array(categorical_idx)
+
+            if categorical_idx.size != 0 and isinstance(categorical_idx[0], str) and features_names is None:
+                raise ValueError(
+                    'Impossible to specify categorical features by name when the features_names are not specified'
+                )
+
+            if categorical_idx.size != 0 and isinstance(categorical_idx[0], str):
+                categorical_idx = np.array(
+                    [idx for idx, column in enumerate(features_names) if column in set(categorical_idx)]
+                )
+
+            if categorical_idx.size != 0:
+                categorical_features = features[:, categorical_idx]
+
+        data = InputData(
+            idx=idx,
+            features=features,
+            target=target,
+            task=task,
+            data_type=data_type,
+            features_names=features_names,
+            categorical_idx=categorical_idx,
+            categorical_features=categorical_features
+        )
+
+        return data
+
+    @classmethod
+    def from_csv_time_series(cls,
+                             file_path: PathType,
+                             delimiter: str = ',',
+                             task: Union[Task, str] = 'ts_forecasting',
+                             is_predict: bool = False,
+                             columns_to_drop: Optional[List] = None,
+                             target_column: Optional[str] = '',
+                             index_col: Optional[Union[str, int]] = None,
+                             possible_idx_keywords: Optional[List[str]] = None) -> InputData:
+        """
+        Forms :obj:`InputData` of ``ts`` type from columns of different variant of the same variable.
+
+        Args:
+            file_path: path to the source csv file.
+            delimiter: delimiter for pandas DataFrame.
+            task: the :obj:`Task` that should be solved with data.
+            is_predict: indicator of stage to prepare the data to. ``False`` means fit, ``True`` means predict.
+            columns_to_drop: ``list`` with names of columns to ignore.
+            target_column: ``string`` with name of target column, used for predict stage.
+            index_col: name or index of the column to use as the :obj:`Data.idx`.\n
+                If ``None``, then check the first column's name and use it as index if succeeded
+                (see the param ``possible_idx_keywords``).\n
+                Set ``False`` to skip the check and rearrange a new integer index.
+            possible_idx_keywords: lowercase keys to find. If the first data column contains one of the keys,
+                it is used as index. See the :const:`POSSIBLE_TS_IDX_KEYWORDS` for the list of default keywords.
+
+        Returns:
+            An instance of :class:`InputData`.
         """
 
-        data_frame = pd.read_csv(file_path, sep=delimiter, index_col=index_col)
-        if columns_to_drop:
-            data_frame = data_frame.drop(columns_to_drop, axis=1)
+        possible_idx_keywords = possible_idx_keywords or POSSIBLE_TS_IDX_KEYWORDS
+        if isinstance(task, str):
+            task = Task(TaskTypesEnum(task))
 
-        idx = data_frame.index.to_numpy()
-        features, target = process_target_and_features(data_frame, target_columns)
-
-        return InputData(idx=idx, features=features, target=target, task=task, data_type=data_type)
-
-    @staticmethod
-    def from_csv_time_series(task: Task,
-                             file_path=None,
-                             delimiter=',',
-                             is_predict=False,
-                             target_column: Optional[str] = ''):
-        df = pd.read_csv(file_path, sep=delimiter)
-
-        idx = get_indices_from_file(df, file_path)
+        df = get_df_from_csv(file_path, delimiter, index_col, possible_idx_keywords, columns_to_drop=columns_to_drop)
+        idx = df.index.to_numpy()
 
         if target_column is not None:
             time_series = np.array(df[target_column])
@@ -94,26 +313,39 @@ class Data:
 
         return input_data
 
-    @staticmethod
-    def from_csv_multi_time_series(task: Task,
-                                   file_path=None,
-                                   delimiter=',',
-                                   is_predict=False,
+    @classmethod
+    def from_csv_multi_time_series(cls,
+                                   file_path: PathType,
+                                   delimiter: str = ',',
+                                   task: Union[Task, str] = 'ts_forecasting',
+                                   is_predict: bool = False,
                                    columns_to_use: Optional[list] = None,
-                                   target_column: Optional[str] = ''):
+                                   target_column: Optional[str] = '',
+                                   index_col: Optional[Union[str, int]] = None,
+                                   possible_idx_keywords: Optional[List[str]] = None) -> InputData:
         """
-        Forms InputData of multi_ts type from columns of different variant of the same variable
+        Forms :obj:`InputData` of ``multi_ts`` type from columns of different variant of the same variable
 
-        :param task: the task that should be solved with data
-        :param file_path: path to csv file
-        :param delimiter: delimiter for pandas df
-        :param is_predict: is preparing for fit or predict stage
-        :param columns_to_use: list with names of columns of different variant of the same variable
-        :param target_column: string with name of target column, used for predict stage
+        Args:
+            file_path: path to csv file.
+            delimiter: delimiter for pandas df.
+            task: the :obj:`Task` that should be solved with data.
+            is_predict: indicator of stage to prepare the data to. ``False`` means fit, ``True`` means predict.
+            columns_to_use: ``list`` with names of columns of different variant of the same variable.
+            target_column: ``string`` with name of target column, used for predict stage.
+            index_col: name or index of the column to use as the :obj:`Data.idx`.\n
+                If ``None``, then check the first column's name and use it as index if succeeded
+                (see the param ``possible_idx_keywords``).\n
+                Set ``False`` to skip the check and rearrange a new integer index.
+            possible_idx_keywords: lowercase keys to find. If the first data column contains one of the keys,
+                it is used as index. See the :const:`POSSIBLE_TS_IDX_KEYWORDS` for the list of default keywords.
+
+        Returns:
+            An instance of :class:`InputData`.
         """
-        df = pd.read_csv(file_path, sep=delimiter)
 
-        idx = get_indices_from_file(df, file_path)
+        df = get_df_from_csv(file_path, delimiter, index_col, possible_idx_keywords, columns_to_use=columns_to_use)
+        idx = df.index.to_numpy()
         if columns_to_use is not None:
             actual_df = df[columns_to_use]
             multi_time_series = actual_df.to_numpy()
@@ -148,18 +380,25 @@ class Data:
     def from_image(images: Union[str, np.ndarray] = None,
                    labels: Union[str, np.ndarray] = None,
                    task: Task = Task(TaskTypesEnum.classification),
-                   target_size: Optional[Tuple[int, int]] = None):
+                   target_size: Optional[Tuple[int, int]] = None) -> InputData:
+        """Input data from Image
+
+        Args:
+            images: the path to the directory with image data in ``np.ndarray`` format
+                or array in ``np.ndarray`` format
+            labels: the path to the directory with image labels in ``np.ndarray`` format
+                or array in ``np.ndarray`` format
+            task: the :obj:`Task` that should be solved with data
+            target_size: size for the images resizing (if necessary)
+
+        Returns:
+            An instance of :class:`InputData`.
         """
-        :param images: the path to the directory with image data in np.ndarray format or array in np.ndarray format
-        :param labels: the path to the directory with image labels in np.ndarray format or array in np.ndarray format
-        :param task: the task that should be solved with data
-        :param target_size: size for the images resizing (if necessary)
-        :return:
-        """
+
         features = images
         target = labels
 
-        if type(images) is str:
+        if isinstance(images, str):
             # if upload from path
             if '*.jpeg' in images:
                 # upload from folder of images
@@ -177,6 +416,9 @@ class Data:
                 # upload from array
                 features = np.load(images)
                 target = np.load(labels)
+                # add channels if None
+                if len(features.shape) == 3:
+                    features = np.expand_dims(features, -1)
 
         idx = np.arange(0, len(features))
 
@@ -186,7 +428,7 @@ class Data:
     def from_text_meta_file(meta_file_path: str = None,
                             label: str = 'label',
                             task: Task = Task(TaskTypesEnum.classification),
-                            data_type: DataTypesEnum = DataTypesEnum.text):
+                            data_type: DataTypesEnum = DataTypesEnum.text) -> InputData:
 
         if os.path.isdir(meta_file_path):
             raise ValueError("""CSV file expected but got directory""")
@@ -196,8 +438,8 @@ class Data:
         messages = df_text['text'].astype('U').tolist()
 
         features = np.array(messages)
-        target = np.array(df_text[label])
-        idx = [index for index in range(len(target))]
+        target = np.array(df_text[label]).reshape(-1, 1)
+        idx = np.array([index for index in range(len(target))])
 
         return InputData(idx=idx, features=features,
                          target=target, task=task, data_type=data_type)
@@ -206,7 +448,7 @@ class Data:
     def from_text_files(files_path: str,
                         label: str = 'label',
                         task: Task = Task(TaskTypesEnum.classification),
-                        data_type: DataTypesEnum = DataTypesEnum.text):
+                        data_type: DataTypesEnum = DataTypesEnum.text) -> InputData:
 
         if os.path.isfile(files_path):
             raise ValueError("""Path to the directory expected but got file""")
@@ -214,8 +456,8 @@ class Data:
         df_text = TextBatchLoader(path=files_path).extract()
 
         features = np.array(df_text['text'])
-        target = np.array(df_text[label])
-        idx = [index for index in range(len(target))]
+        target = np.array(df_text[label]).reshape(-1, 1)
+        idx = np.array([index for index in range(len(target))])
 
         return InputData(idx=idx, features=features,
                          target=target, task=task, data_type=data_type)
@@ -226,18 +468,21 @@ class Data:
                         label: str = 'label',
                         task: Task = Task(TaskTypesEnum.classification),
                         data_type: DataTypesEnum = DataTypesEnum.table,
-                        export_to_meta=False, is_multilabel=False, shuffle=True) -> 'InputData':
-        """
-        Generates InputData from the set of JSON files with different fields
-        :param files_path: path the folder with jsons
-        :param fields_to_use: list of fields that will be considered as a features
-        :param label: name of field with target variable
-        :param task: task to solve
-        :param data_type: data type in fields (as well as type for obtained InputData)
-        :param export_to_meta: combine extracted field and save to CSV
-        :param is_multilabel: if True, creates multilabel target
-        :param shuffle: if True, shuffles data
-        :return: combined dataset
+                        export_to_meta=False, is_multilabel=False, shuffle=True) -> InputData:
+        """Generates InputData from the set of ``JSON`` files with different fields
+
+        Args:
+            files_path: path the folder with ``json`` files
+            fields_to_use: ``list`` of fields that will be considered as a features
+            label: name of field with target variable
+            task: :obj:`Task` to solve
+            data_type: data type in fields (as well as type for obtained :obj:`InputData`)
+            export_to_meta: combine extracted field and save to ``CSV``
+            is_multilabel: if ``True``, creates multilabel target
+            shuffle: if ``True``, shuffles data
+
+        Returns:
+            An instance of :class:`InputData`.
         """
 
         if os.path.isfile(files_path):
@@ -248,19 +493,19 @@ class Data:
 
         if len(fields_to_use) > 1:
             fields_to_combine = []
-            for field in fields_to_use:
-                fields_to_combine.append(np.array(df_data[field]))
+            for field_to_use in fields_to_use:
+                fields_to_combine.append(np.array(df_data[field_to_use]))
                 # Unite if the element of text data is divided into strings
-                if isinstance(df_data[field][0], list):
-                    df_data[field] = [' '.join(piece) for piece in df_data[field]]
+                if isinstance(df_data[field_to_use][0], list):
+                    df_data[field_to_use] = [' '.join(piece) for piece in df_data[field_to_use]]
 
             features = np.column_stack(tuple(fields_to_combine))
         else:
-            field = df_data[fields_to_use[0]]
-            # process field with nested list
-            if isinstance(field[0], list):
-                field = [' '.join(piece) for piece in field]
-            features = np.array(field)
+            field_to_use = df_data[fields_to_use[0]]
+            # process field_to_use with nested list
+            if isinstance(field_to_use[0], list):
+                field_to_use = [' '.join(piece) for piece in field_to_use]
+            features = np.array(field_to_use)
 
         if is_multilabel:
             target = df_data[label]
@@ -278,7 +523,7 @@ class Data:
         else:
             target = np.array(df_data[label])
 
-        idx = [index for index in range(len(target))]
+        idx = np.array([index for index in range(len(target))])
 
         return InputData(idx=idx, features=features,
                          target=target, task=task, data_type=data_type)
@@ -289,17 +534,42 @@ class Data:
             dataframe['target'] = self.target
         dataframe.to_csv(path_to_save)
 
+    @property
+    def memory_usage(self):
+        if isinstance(self.features, np.ndarray):
+            return sum([feature.nbytes for feature in self.features.T])
+        else:
+            return self.features.memory_usage().sum()
+
 
 @dataclass
 class InputData(Data):
+    """Data class for input data for the nodes
     """
-    Data class for input data for the nodes
-    """
+
+    def __post_init__(self):
+        if self.numerical_idx is None:
+            if self.features is not None and isinstance(self.features, np.ndarray) and self.features.ndim > 1:
+                if self.categorical_idx is None:
+                    self.numerical_idx = np.arange(0, self.features.shape[1])
+                else:
+                    self.numerical_idx = np.setdiff1d(np.arange(0, self.features.shape[1]), self.categorical_idx)
+            else:
+                self.numerical_idx = np.array([0])
 
     @property
     def num_classes(self) -> Optional[int]:
+        """Returns number of classes that are present in the target.
+        NB: if some labels are not present in this data, then
+        number of classes can be less than in the full dataset!"""
+        unique_values = self.class_labels
+        return len(unique_values) if unique_values is not None else None
+
+    @property
+    def class_labels(self) -> Optional[int]:
+        """Returns unique class labels that are present in the target"""
         if self.task.task_type == TaskTypesEnum.classification and self.target is not None:
-            return len(np.unique(self.target))
+            return np.unique(self.target)
         else:
             return None
 
@@ -314,11 +584,15 @@ class InputData(Data):
                          task=self.task, data_type=self.data_type)
 
     def subset_indices(self, selected_idx: List):
+        """Get subset from :obj:`InputData` to extract all items with specified indices
+
+        Args:
+            selected_idx: ``list`` of indices for extraction
+
+        Returns:
+            :obj:`InputData`
         """
-        Get subset from InputData to extract all items with specified indices
-        :param selected_idx: list of indices for extraction
-        :return:
-        """
+
         idx_list = [str(i) for i in self.idx]
 
         # extractions of row number for each existing index from selected_idx
@@ -332,22 +606,37 @@ class InputData(Data):
                          target=self.target[row_nums],
                          task=self.task, data_type=self.data_type)
 
-    def subset_features(self, features_ids: list):
-        """ Return new InputData with subset of features based on features_ids list """
-        subsample_features = self.features[:, features_ids]
-        subsample_input = InputData(features=subsample_features,
-                                    data_type=self.data_type,
-                                    target=self.target, task=self.task,
-                                    idx=self.idx,
-                                    supplementary_data=self.supplementary_data)
+    def subset_features(self, feature_ids: np.array) -> Optional[InputData]:
+        """
+        Return new :obj:`InputData` with subset of features based on non-empty ``features_ids`` list or `None` otherwise
+        """
+        if feature_ids is None or feature_ids.size == 0:
+            return None
+        if isinstance(self.features, np.ndarray):
+            subsample_features = self.features[:, feature_ids]
+        else:
+            subsample_features = self.features.iloc[:, feature_ids]
+
+        subsample_input = InputData(
+            features=subsample_features,
+            data_type=self.data_type,
+            target=self.target, task=self.task,
+            idx=self.idx,
+            categorical_idx=np.setdiff1d(self.categorical_idx, feature_ids),
+            numerical_idx=np.setdiff1d(self.numerical_idx, feature_ids),
+            encoded_idx=np.setdiff1d(self.encoded_idx, feature_ids),
+            categorical_features=self.categorical_features,
+            features_names=self.features_names,
+            supplementary_data=self.supplementary_data
+        )
 
         return subsample_input
 
     def shuffle(self):
+        """Shuffles features and target if possible
         """
-        Shuffles features and target if possible
-        """
-        if self.data_type is DataTypesEnum.table:
+
+        if self.data_type in (DataTypesEnum.table, DataTypesEnum.image, DataTypesEnum.text):
             shuffled_ind = np.random.permutation(len(self.features))
             idx, features, target = np.asarray(self.idx)[shuffled_ind], self.features[shuffled_ind], self.target[
                 shuffled_ind]
@@ -358,11 +647,13 @@ class InputData(Data):
             pass
 
     def convert_non_int_indexes_for_fit(self, pipeline):
-        """ Conversion non int (datetime, string, etc) indexes in integer form in fit stage """
+        """Conversion non ``int`` (``datetime``, ``string``, etc) indexes in ``integer`` form on the fit stage
+        """
+
         copied_data = deepcopy(self)
         is_timestamp = isinstance(copied_data.idx[0], pd._libs.tslibs.timestamps.Timestamp)
         is_numpy_datetime = isinstance(copied_data.idx[0], np.datetime64)
-        # if fit stage- just creating range of integers
+        # if fit stage-just creating range of integers
         if is_timestamp or is_numpy_datetime:
             copied_data.supplementary_data.non_int_idx = copy(copied_data.idx)
             copied_data.idx = np.array(range(len(copied_data.idx)))
@@ -373,14 +664,16 @@ class InputData(Data):
             pipeline.last_idx_int = copied_data.idx[-1]
             pipeline.last_idx_dt = last_idx_time
             pipeline.period = last_idx_time - pre_last_time
-        elif type(copied_data.idx[0]) not in [int, np.int32, np.int64]:
+        elif not isinstance(copied_data.idx[0], (int, np.int32, np.int64)):
             copied_data.supplementary_data.non_int_idx = copy(copied_data.idx)
             copied_data.idx = np.array(range(len(copied_data.idx)))
             pipeline.last_idx_int = copied_data.idx[-1]
         return copied_data
 
     def convert_non_int_indexes_for_predict(self, pipeline):
-        """Conversion non int (datetime, string, etc) indexes in integer form in predict stage"""
+        """Conversion non ``int`` (``datetime``, ``string``, etc) indexes in ``integer`` form on the predict stage
+        """
+
         copied_data = deepcopy(self)
         is_timestamp = isinstance(copied_data.idx[0], pd._libs.tslibs.timestamps.Timestamp)
         is_numpy_datetime = isinstance(copied_data.idx[0], np.datetime64)
@@ -388,12 +681,65 @@ class InputData(Data):
         if is_timestamp or is_numpy_datetime:
             copied_data.supplementary_data.non_int_idx = copy(self.idx)
             copied_data.idx = self._resolve_non_int_idx(pipeline)
-        elif type(copied_data.idx[0]) not in [int, np.int32, np.int64]:
+        elif not isinstance(copied_data.idx[0], (int, np.int32, np.int64)):
             # note, that string indexes do not have an order and always we think that indexes we want to predict go
             # immediately after the train indexes
             copied_data.supplementary_data.non_int_idx = copy(copied_data.idx)
             copied_data.idx = pipeline.last_idx_int + np.array(range(1, len(copied_data.idx) + 1))
         return copied_data
+
+    def get_not_encoded_data(self):
+        new_features, new_features_names = None, None
+        new_num_idx, new_cat_idx = None, None
+        num_features, cat_features = None, None
+        num_features_names, cat_features_names = None, None
+
+        # Checking numerical data exists
+        if self.numerical_idx is not None and self.numerical_idx.size != 0:
+            if isinstance(self.features, np.ndarray):
+                num_features = self.features[:, self.numerical_idx]
+            else:
+                num_features = self.features.iloc[:, self.numerical_idx].to_numpy()
+
+            if self.features_names is not None and np.size(self.features_names):
+                num_features_names = self.features_names[self.numerical_idx]
+            else:
+                num_features_names = np.array([f'num_feature_{i}' for i in range(1, num_features.shape[1] + 1)])
+
+        # Checking categorical data exists
+        if self.categorical_idx is not None and self.categorical_idx.size != 0:
+            cat_features = self.categorical_features
+
+            if self.features_names is not None and np.size(self.features_names):
+                cat_features_names = self.features_names[self.categorical_idx]
+            else:
+                cat_features_names = np.array([f'cat_feature_{i}' for i in range(1, cat_features.shape[1] + 1)])
+
+        if num_features is not None and cat_features is not None:
+            new_features = np.hstack((num_features, cat_features))
+            new_features_names = np.hstack((num_features_names, cat_features_names))
+            new_features_idx = np.array(range(new_features.shape[1]))
+            new_num_idx = new_features_idx[:num_features.shape[1]]
+            new_cat_idx = new_features_idx[-cat_features.shape[1]:]
+
+        elif cat_features is not None:
+            new_features = cat_features
+            new_features_names = cat_features_names
+            new_cat_idx = np.array(range(new_features.shape[1]))
+
+        elif num_features is not None:
+            new_features = num_features
+            new_features_names = num_features_names
+            new_num_idx = np.array(range(new_features.shape[1]))
+        else:
+            raise ValueError('There is no features')
+
+        if isinstance(new_features, pd.DataFrame):
+            new_features.columns = new_features_names
+
+        return InputData(idx=self.idx, features=new_features, features_names=new_features_names,
+                         numerical_idx=new_num_idx, categorical_idx=new_cat_idx,
+                         target=self.target, task=self.task, data_type=self.data_type)
 
     @staticmethod
     def _resolve_func(pipeline, x):
@@ -405,16 +751,17 @@ class InputData(Data):
 
 @dataclass
 class OutputData(Data):
+    """``Data`` type for data prediction in the node
     """
-    Data type for data prediction in the node
-    """
-    predict: np.ndarray = None
+
+    features: Optional[Union[np.ndarray, pd.DataFrame]] = None
+    predict: Optional[np.ndarray] = None
     target: Optional[np.ndarray] = None
+    encoded_idx: Optional[np.ndarray] = None
 
 
 def _resize_image(file_path: str, target_size: Tuple[int, int]):
-    """
-    Function resizes and rewrites the input image
+    """Function resizes and rewrites the input image
     """
 
     img = cv2.imread(file_path)
@@ -427,14 +774,16 @@ def _resize_image(file_path: str, target_size: Tuple[int, int]):
 def process_target_and_features(data_frame: pd.DataFrame,
                                 target_column: Optional[Union[str, List[str]]]
                                 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-    """ Function process pandas dataframe with single column
+    """Function process pandas ``dataframe`` with single column
 
-    :param data_frame: loaded pandas DataFrame
-    :param target_column: names of columns with target or None
+    Args:
+        data_frame: loaded pandas :obj:`DataFrame`
+        target_column: names of columns with target or ``None``
 
-    :return features: numpy array (table) with features
-    :return target: numpy array (column) with target
+    Returns:
+        (``np.array`` (table) with features, ``np.array`` (column) with target)
     """
+
     if target_column == '':
         # Take the last column in the table
         target_column = data_frame.columns[-1]
@@ -461,25 +810,84 @@ def data_type_is_multi_ts(data: InputData) -> bool:
     return data.data_type is DataTypesEnum.multi_ts
 
 
-def get_indices_from_file(data_frame, file_path):
-    if 'datetime' in data_frame.columns:
+def data_type_is_text(data: InputData) -> bool:
+    return data.data_type is DataTypesEnum.text
+
+
+def data_type_is_image(data: InputData) -> bool:
+    return data.data_type is DataTypesEnum.image
+
+
+def get_indices_from_file(data_frame, file_path, idx_column='datetime') -> Iterable[Any]:
+    if idx_column in data_frame.columns:
         df = pd.read_csv(file_path,
-                         parse_dates=['datetime'])
-        idx = [str(d) for d in df['datetime']]
+                         parse_dates=[idx_column])
+        idx = [str(d) for d in df[idx_column]]
         return idx
     return np.arange(0, len(data_frame))
 
 
-def array_to_input_data(features_array: np.array,
-                        target_array: np.array,
-                        idx: Optional[np.array] = None,
-                        task: Task = Task(TaskTypesEnum.classification)):
-    data_type = autodetect_data_type(task)
+def np_datetime_to_numeric(data: np.ndarray) -> np.ndarray:
+    """
+    Change data's datetime type to integer with milliseconds unit.
 
+    Args:
+        data: table data for converting.
+
+    Returns:
+        The same table data with datetimes (if existed) converted to integer
+    """
+    orig_shape = data.shape
+    out_dtype = np.int64 if 'datetime' in str((dt := data.dtype)) else dt
+    features_df = pd.DataFrame(data, copy=False).infer_objects()
+    date_cols = features_df.select_dtypes('datetime')
+    converted_cols = date_cols.to_numpy(np.int64) // 1e6  # to 'ms' unit from 'ns'
+    features_df[date_cols.columns] = converted_cols
+    return features_df.to_numpy(out_dtype).reshape(orig_shape)
+
+
+def array_to_input_data(features_array: np.ndarray,
+                        target_array: np.ndarray,
+                        features_names: np.ndarray[str] = None,
+                        categorical_idx: Union[list[int, str], np.ndarray[int, str]] = None,
+                        idx: Optional[np.ndarray] = None,
+                        task: Task = Task(TaskTypesEnum.classification),
+                        data_type: Optional[DataTypesEnum] = None) -> InputData:
     if idx is None:
         idx = np.arange(len(features_array))
+    if data_type is None:
+        data_type = autodetect_data_type(task)
 
-    return InputData(idx=idx, features=features_array, target=target_array, task=task, data_type=data_type)
+    categorical_features = None
+    if categorical_idx is not None:
+        if isinstance(categorical_idx, list):
+            categorical_idx = np.array(categorical_idx)
+
+        if categorical_idx.size != 0 and isinstance(categorical_idx[0], str) and features_names is None:
+            raise ValueError(
+                'Impossible to specify categorical features by name when the features_names are not specified'
+            )
+
+        if categorical_idx.size != 0 and isinstance(categorical_idx[0], str):
+            categorical_idx = np.array(
+                [idx for idx, column in enumerate(features_names) if column in set(categorical_idx)]
+            )
+
+        if categorical_idx.size != 0:
+            categorical_features = features_array[:, categorical_idx]
+
+    data = InputData(
+        idx=idx,
+        features=features_array,
+        target=target_array,
+        features_names=features_names,
+        categorical_idx=categorical_idx,
+        categorical_features=categorical_features,
+        task=task,
+        data_type=data_type
+    )
+
+    return data
 
 
 def autodetect_data_type(task: Task) -> DataTypesEnum:
@@ -487,3 +895,45 @@ def autodetect_data_type(task: Task) -> DataTypesEnum:
         return DataTypesEnum.ts
     else:
         return DataTypesEnum.table
+
+
+def get_df_from_csv(file_path: PathType, delimiter: str, index_col: Optional[Union[str, int]] = None,
+                    possible_idx_keywords: Optional[List[str]] = None, *,
+                    columns_to_drop: Optional[List[Union[str, int]]] = None,
+                    columns_to_use: Optional[List[Union[str, int]]] = None):
+    def define_index_column(candidate_columns: List[str]) -> Optional[str]:
+        for column_name in candidate_columns:
+            if is_column_name_suitable_for_index(column_name):
+                return column_name
+
+    def is_column_name_suitable_for_index(column_name: str) -> bool:
+        return any(key in column_name.lower() for key in possible_idx_keywords)
+
+    columns_to_drop = copy(columns_to_drop) or []
+    columns_to_use = copy(columns_to_use) or []
+    possible_idx_keywords = possible_idx_keywords or []
+
+    logger = default_log('CSV data extraction')
+
+    columns = pd.read_csv(file_path, sep=delimiter, index_col=False, nrows=1).columns
+
+    if columns_to_drop and columns_to_use:
+        raise ValueError('Incompatible arguments are used: columns_to_drop and columns_to_use. '
+                         'Only one of them can be specified simultaneously.')
+
+    if columns_to_drop:
+        columns_to_use = [col for col in columns if col not in columns_to_drop]
+    elif not columns_to_use:
+        columns_to_use = list(columns)
+
+    candidate_idx_cols = [columns_to_use[0], columns[0]]
+    if index_col is None:
+        defined_index = define_index_column(candidate_idx_cols)
+        if defined_index is not None:
+            index_col = defined_index
+            logger.message(f'Used the column as index: "{index_col}".')
+
+    if (index_col is not None) and (index_col not in columns_to_use):
+        columns_to_use.append(index_col)
+
+    return pd.read_csv(file_path, sep=delimiter, index_col=index_col, usecols=columns_to_use)

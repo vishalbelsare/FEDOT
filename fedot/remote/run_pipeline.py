@@ -3,11 +3,13 @@ import os
 import sys
 from typing import Union
 
+from golem.core.log import default_log
+from golem.utilities.random import RandomStateHandler
+
 from fedot.core.data.data import InputData
 from fedot.core.data.multi_modal import MultiModalData
-from fedot.core.log import default_log
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.validation import validate
+from fedot.core.pipelines.verification import verifier_for_task
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TaskTypesEnum
 from fedot.remote.pipeline_run_config import PipelineRunConfig
@@ -25,7 +27,7 @@ def _load_ts_data(config):
         train_data = MultiModalData.from_csv_time_series(
             file_path=config.input_data,
             task=task, target_column=config.target,
-            var_names=config.var_names)
+            columns_to_use=config.var_names)
     else:
         train_data = InputData.from_csv_time_series(
             file_path=config.input_data,
@@ -43,11 +45,13 @@ def _load_data(config):
     return train_data
 
 
-def fit_pipeline(config_file: Union[str, bytes]) -> bool:
-    logger = default_log('pipeline_fitting_logger')
+def fit_pipeline(config_file: Union[str, bytes], save_pipeline: bool = True) -> bool:
+    logger = default_log(prefix='pipeline_fitting_logger')
 
     config = \
         PipelineRunConfig().load_from_file(config_file)
+
+    verifier = verifier_for_task(config.task.task_type)
 
     pipeline = pipeline_from_json(config.pipeline_template)
 
@@ -57,13 +61,12 @@ def fit_pipeline(config_file: Union[str, bytes]) -> bool:
     if config.train_data_idx not in [None, []]:
         train_data = train_data.subset_indices(config.train_data_idx)
 
-    try:
-        validate(pipeline, task=config.task)
-    except ValueError:
+    if not verifier(pipeline):
         logger.error('Pipeline not valid')
         return False
 
     try:
+        RandomStateHandler.MODEL_FITTING_SEED = 0
         pipeline.fit_from_scratch(train_data)
     except Exception as ex:
         logger.error(ex)
@@ -73,15 +76,16 @@ def fit_pipeline(config_file: Union[str, bytes]) -> bool:
         test_data = InputData.from_csv(config.test_data_path)
         pipeline.predict(test_data)
 
-    pipeline.save(path=os.path.join(config.output_path, 'fitted_pipeline'), datetime_in_path=False)
+    if save_pipeline:
+        pipeline.save(path=os.path.join(config.output_path, 'fitted_pipeline'), create_subdir=False,
+                      is_datetime_in_path=False)
 
     return True
 
 
 def pipeline_from_json(json_str: str):
     json_dict = json.loads(json_str)
-    pipeline = Pipeline()
-    pipeline.load(json_dict)
+    pipeline = Pipeline.from_serialized(json_dict)
 
     return pipeline
 

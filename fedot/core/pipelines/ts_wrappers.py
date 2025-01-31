@@ -1,16 +1,18 @@
+import math
 from copy import copy
-from typing import Union
+from typing import Union, Optional
 
 import numpy as np
 
 from fedot.core.data.data import InputData, OutputData
 from fedot.core.data.multi_modal import MultiModalData
 from fedot.core.operations.evaluation.operation_implementations.data_operations.ts_transformations import ts_to_table
+from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TaskTypesEnum
 
 
-def out_of_sample_ts_forecast(pipeline, input_data: InputData,
+def out_of_sample_ts_forecast(pipeline: Pipeline, input_data: Union[InputData, MultiModalData],
                               horizon: int = None) -> np.array:
     """
     Method allow make forecast with appropriate forecast length. The previously
@@ -24,55 +26,41 @@ def out_of_sample_ts_forecast(pipeline, input_data: InputData,
     :param horizon: forecasting horizon
     :return final_forecast: array with forecast
     """
-    # Prepare data for time series forecasting
     task = input_data.task
     exception_if_not_ts_task(task)
 
-    if isinstance(input_data, InputData):
+    # How many elements to the future pipeline can produce
+    forecast_length = task.task_params.forecast_length
+
+    final_forecast = []
+    if isinstance(input_data, MultiModalData) or input_data.data_type == DataTypesEnum.multi_ts:
+        if forecast_length < horizon:
+            raise ValueError('In case of multi-modal time-series and multi time-series'
+                             'forecast horizon can not be bigger than forecast length model was fitted for.\n'
+                             f'forecast_length = {forecast_length}\n'
+                             f'horizon = {horizon}')
+        iter_predict = pipeline.predict(input_data).predict
+        iter_predict = np.ravel(np.array(iter_predict))
+        final_forecast.append(iter_predict)
+    else:
         pre_history_ts = np.array(input_data.features)
-
-        # How many elements to the future pipeline can produce
-        scope_len = task.task_params.forecast_length
-        number_of_iterations = _calculate_number_of_steps(scope_len, horizon)
-
+        number_of_iterations = math.ceil(horizon / forecast_length)
         # Make forecast iteratively moving throw the horizon
-        final_forecast = []
         for _ in range(0, number_of_iterations):
-            iter_predict = pipeline.root_node.predict(input_data=input_data)
-            iter_predict = np.ravel(np.array(iter_predict.predict))
+            iter_predict = pipeline.predict(input_data=input_data).predict
+            iter_predict = np.ravel(np.array(iter_predict))
             final_forecast.append(iter_predict)
 
             # Add prediction to the historical data - update it
             pre_history_ts = np.hstack((pre_history_ts, iter_predict))
 
             # Prepare InputData for next iteration
-            input_data = _update_input(pre_history_ts, scope_len, task)
-    elif isinstance(input_data, MultiModalData):
-        data = MultiModalData()
-        for data_id in input_data.keys():
-            features = input_data[data_id].features
-            pre_history_ts = np.array(features)
-            source_len = len(pre_history_ts)
-
-            # How many elements to the future pipeline can produce
-            scope_len = task.task_params.forecast_length
-            number_of_iterations = _calculate_number_of_steps(scope_len, horizon)
-
-        # Make forecast iteratively moving throw the horizon
-        final_forecast = []
-        for _ in range(0, number_of_iterations):
-            iter_predict = pipeline.predict(input_data=input_data)
-            iter_predict = np.ravel(np.array(iter_predict.predict))
-            final_forecast.append(iter_predict)
-
-            # Add prediction to the historical data - update it
-            pre_history_ts = np.hstack((pre_history_ts, iter_predict))
-
-            # Prepare InputData for next iteration
-            input_data = _update_input(pre_history_ts, scope_len, task)
+            input_data = _update_input(pre_history_ts, forecast_length, task)
 
     # Create output data
     final_forecast = np.ravel(np.array(final_forecast))
+    if final_forecast.ndim > 1:
+        final_forecast = np.squeeze(final_forecast)
     # Clip the forecast if it is necessary
     final_forecast = final_forecast[:horizon]
     return final_forecast
@@ -96,9 +84,9 @@ def in_sample_ts_forecast(pipeline, input_data: Union[InputData, MultiModalData]
     # Divide data on samples into pre-history and validation part
     task = input_data.task
     exception_if_not_ts_task(task)
-
-    # Is there need to fit on supplemented time-series
-    force_refit = is_force_refit_needed(pipeline)
+    # How many elements to the future pipeline can produce
+    scope_len = task.task_params.forecast_length
+    number_of_iterations = _calculate_number_of_steps(scope_len, horizon)
 
     if isinstance(input_data, InputData):
         time_series = np.array(input_data.features)
@@ -106,16 +94,7 @@ def in_sample_ts_forecast(pipeline, input_data: Union[InputData, MultiModalData]
         source_len = len(pre_history_ts)
         last_index_pre_history = source_len - 1
 
-        # How many elements to the future pipeline can produce
-        scope_len = task.task_params.forecast_length
-        number_of_iterations = _calculate_number_of_steps(scope_len, horizon)
-
-        # Calculate intervals
-        intervals = _calculate_intervals(last_index_pre_history,
-                                         number_of_iterations,
-                                         scope_len)
-
-        data = _update_input(pre_history_ts, scope_len, task)
+        data = _update_input(pre_history_ts, scope_len, task, input_data.data_type)
     else:
         # TODO simplify
 
@@ -127,32 +106,17 @@ def in_sample_ts_forecast(pipeline, input_data: Union[InputData, MultiModalData]
             source_len = len(pre_history_ts)
             last_index_pre_history = source_len - 1
 
-            # How many elements to the future pipeline can produce
-            scope_len = task.task_params.forecast_length
-            number_of_iterations = _calculate_number_of_steps(scope_len, horizon)
-
-            # Calculate intervals
-            intervals = _calculate_intervals(last_index_pre_history,
-                                             number_of_iterations,
-                                             scope_len)
-
-            local_data = _update_input(pre_history_ts, scope_len, task)
+            local_data = _update_input(pre_history_ts, scope_len, task, input_data[data_id].data_type)
             data[data_id] = local_data
+
+    # Calculate intervals
+    intervals = _calculate_intervals(last_index_pre_history,
+                                     number_of_iterations,
+                                     scope_len)
 
     # Make forecast iteratively moving throw the horizon
     final_forecast = []
     for _, border in zip(range(0, number_of_iterations), intervals):
-
-        # add fit by flag
-        if force_refit:
-            # change index for fitting
-            predict_idx = data.idx
-            data.idx = np.arange(0, len(data.features))
-            # change target for fitting
-            data.target = data.features
-            pipeline.fit_from_scratch(data)
-            # change index for predict
-            data.idx = predict_idx
 
         iter_predict = pipeline.predict(input_data=data)
         iter_predict = np.ravel(np.array(iter_predict.predict))
@@ -162,7 +126,7 @@ def in_sample_ts_forecast(pipeline, input_data: Union[InputData, MultiModalData]
             # Add actual values to the historical data - update it
             pre_history_ts = time_series[:border + 1]
             # Prepare InputData for next iteration
-            data = _update_input(pre_history_ts, scope_len, task)
+            data = _update_input(pre_history_ts, scope_len, task, input_data.data_type)
         else:
             # TODO simplify
             data = MultiModalData()
@@ -170,7 +134,7 @@ def in_sample_ts_forecast(pipeline, input_data: Union[InputData, MultiModalData]
                 features = input_data[data_id].features
                 time_series = np.array(features)
                 pre_history_ts = time_series[:border + 1]
-                local_data = _update_input(pre_history_ts, scope_len, task)
+                local_data = _update_input(pre_history_ts, scope_len, task, input_data[data_id].data_type)
                 data[data_id] = local_data
 
     # Create output data
@@ -276,21 +240,24 @@ def _calculate_number_of_steps(scope_len, horizon):
     return amount_of_steps
 
 
-def _update_input(pre_history_ts, scope_len, task):
+def _update_input(pre_history_ts, scope_len, task, data_type: DataTypesEnum = DataTypesEnum.ts):
     """ Method make new InputData object based on the previous part of time
     series
 
-    :param pre_history_ts: time series
-    :param scope_len: how many elements to the future can algorithm forecast
-    :param task: time series forecasting task
+    Args:
+        pre_history_ts: time series
+        scope_len: how many elements to the future can algorithm forecast
+        task: time series forecasting task
+        data_type: type of data (ts or multi_ts
 
-    :return input_data: updated InputData
+    Returns:
+        input_data: updated InputData
     """
     start_forecast = len(pre_history_ts)
     end_forecast = start_forecast + scope_len
     input_data = InputData(idx=np.arange(start_forecast, end_forecast),
                            features=pre_history_ts, target=None,
-                           task=task, data_type=DataTypesEnum.ts)
+                           task=task, data_type=data_type)
 
     return input_data
 
@@ -314,7 +281,7 @@ def _calculate_intervals(last_index_pre_history, amount_of_iterations, scope_len
 
 def exception_if_not_ts_task(task):
     if task.task_type is not TaskTypesEnum.ts_forecasting:
-        raise ValueError(f'Method forecast is available only for time series forecasting task')
+        raise ValueError('Method forecast is available only for time series forecasting task')
 
 
 def generate_ids(source_input, output_data, expand: bool):
@@ -342,11 +309,27 @@ def generate_ids(source_input, output_data, expand: bool):
     return indices_range
 
 
-def is_force_refit_needed(pipeline) -> bool:
-    """ Determine if force refit needed for current pipeline based on nodes tags """
-    is_needed = False
-    for node in pipeline.nodes:
-        if 'in_sample_refit' in node.tags:
-            return True
+def convert_forecast_to_output(pre_history_data: Union[InputData, MultiModalData], forecast: np.array,
+                               idx: Optional[np.array] = None) -> OutputData:
+    """Converts forecast array to OutputData
 
-    return is_needed
+    Args:
+        pre_history_data: data which was used for prediction
+        forecast: array with predicted values
+        idx: array with idx values. If None sets next idx after `pre_history_data` with length of forecast for InputData
+        and idx from 0 to forecast length for MultimodalData.
+    """
+    features = pre_history_data.features if isinstance(pre_history_data, InputData) else None
+    if forecast.ndim > 1:
+        forecast = np.squeeze(forecast)
+    if idx is None:
+        if features is not None:
+            idx = np.arange(len(features), len(features) + len(forecast))
+        else:
+            idx = np.arange(len(forecast))
+    prediction = OutputData(idx=idx,
+                            features=features,
+                            predict=forecast,
+                            task=pre_history_data.task,
+                            data_type=DataTypesEnum.ts)
+    return prediction

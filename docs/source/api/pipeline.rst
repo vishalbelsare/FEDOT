@@ -1,10 +1,8 @@
 Pipeline
-=====
+========
 
-.. automodule:: fedot.core.pipelines.pipeline
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Save&Load
+=========
 
-.. toctree::
-   :glob:
+Pipeline save&load methods are described in
+:doc:`this section </basics/pipeline_save_load>`.

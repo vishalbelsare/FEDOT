@@ -3,13 +3,14 @@ import shutil
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
-from fedot.core.data.data import InputData
-from fedot.core.log import Log, default_log
-from fedot.core.optimisers.opt_history import OptHistory
-from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.utils import default_fedot_data_dir
+import golem.core.paths
+from golem.core.log import LoggerAdapter, default_log
+from golem.core.optimisers.opt_history_objects.opt_history import OptHistory
 
-DEFAULT_PATH = Path(default_fedot_data_dir())
+from fedot.core.data.data import InputData
+from fedot.core.pipelines.pipeline import Pipeline
+
+DEFAULT_PATH = Path(golem.core.paths.default_data_dir())
 DEFAULT_PROJECTS_PATH = DEFAULT_PATH.joinpath('projects')
 
 
@@ -27,12 +28,13 @@ def export_project_to_zip(zip_name: Union[str, Path], pipeline: Pipeline, train_
     :param log_file_name: name of the file with log to export
     """
 
-    log = default_log('fedot.utilities.project_import_export')
+    log = default_log(prefix='fedot.utilities.project_import_export')
     absolute_folder_path, absolute_zip_path, folder_name, zip_name = _prepare_paths(zip_name)
     _check_for_existing_project(absolute_folder_path, absolute_zip_path)
 
     # Converts python objects to files for compression
-    pipeline.save(str(absolute_folder_path.joinpath('pipeline.json')), datetime_in_path=False)
+    pipeline_path = os.path.join(absolute_folder_path, 'pipeline', 'pipeline.json')
+    pipeline.save(pipeline_path, is_datetime_in_path=False, create_subdir=False)
     train_data.to_csv(absolute_folder_path.joinpath('train_data.csv'))
     test_data.to_csv(absolute_folder_path.joinpath('test_data.csv'))
     if opt_history is not None:
@@ -60,7 +62,7 @@ def import_project_from_zip(zip_path: str) -> Tuple[Pipeline, InputData, InputDa
     :param zip_path: path to zip archive
     :return imported classes
     """
-    log = default_log('fedot.utilities.project_import_export')
+    log = default_log(prefix='fedot.utilities.project_import_export')
 
     folder_path, absolute_zip_path, _, zip_name = _prepare_paths(zip_path)
 
@@ -77,8 +79,7 @@ def import_project_from_zip(zip_path: str) -> Tuple[Pipeline, InputData, InputDa
     for root, dirs, files in os.walk(folder_path):
         for file in files:
             if file == 'pipeline.json':
-                pipeline = Pipeline()
-                pipeline.load(os.path.join(root, file))
+                pipeline = Pipeline.from_serialized(os.path.join(root, file))
             elif file == 'train_data.csv':
                 train_data = InputData.from_csv(os.path.join(root, file))
             elif file == 'test_data.csv':
@@ -90,7 +91,7 @@ def import_project_from_zip(zip_path: str) -> Tuple[Pipeline, InputData, InputDa
     return pipeline, train_data, test_data, opt_history
 
 
-def _check_zip_path(zip_path: Path, log: Log) -> Path:
+def _check_zip_path(zip_path: Path, log: LoggerAdapter) -> Path:
     """Check 'zip_path' for correctness."""
 
     zip_path = zip_path.with_suffix('.zip')
@@ -130,7 +131,7 @@ def _prepare_paths(zip_path: Union[str, Path]) -> Tuple[Path, Path, Path, Path]:
 
     absolute_folder_path = DEFAULT_PROJECTS_PATH.joinpath(folder_name)
     if not zip_path.is_absolute():
-        absolute_zip_path = Path(os.getcwd(), zip_path)
+        absolute_zip_path = Path.cwd().joinpath(zip_path)
     else:
         absolute_zip_path = zip_path
         zip_path = Path(zip_path.name)

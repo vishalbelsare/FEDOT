@@ -1,23 +1,43 @@
-import os
-
 import numpy as np
 import pandas as pd
+from golem.core.log import default_log
 
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
-from fedot.core.repository.tasks import TaskTypesEnum, Task
-from fedot.preprocessing.data_types import TableTypesCorrector
+from fedot.core.repository.tasks import Task, TaskTypesEnum
+from fedot.core.utils import fedot_project_root
+from fedot.preprocessing.data_types import TYPE_TO_ID
+from fedot.preprocessing.data_types import TableTypesCorrector, apply_type_transformation
 from fedot.preprocessing.structure import DEFAULT_SOURCE_NAME
-from test.unit.api.test_api_cli_params import project_root_path
-from test.unit.preprocessing.test_pipeline_preprocessing import data_with_mixed_types_in_each_column, \
-    correct_preprocessing_params
+from test.unit.preprocessing.test_pipeline_preprocessing import correct_preprocessing_params, \
+    data_with_mixed_types_in_each_column
+
+
+def get_mixed_data_with_str_and_float_values(idx: int = None):
+    task = Task(TaskTypesEnum.classification)
+    features = np.array([['exal', 'exal', 'exal'],
+                         ['greka', 0, 'greka'],
+                         ['cherez', 1, 'cherez'],
+                         ['reku', 0, 0],
+                         ['vidit', 1, 1],
+                         [1, 0, 1],
+                         [1, 1, 0],
+                         [0, 0, 0]], dtype=object)
+    target = np.array([['no'], ['yes'], ['yes'], ['yes'], ['no'], ['no'], ['no'], ['no']])
+    if isinstance(idx, int):
+        input_data = InputData(idx=np.arange(8),
+                               features=features[:, idx], target=target, task=task, data_type=DataTypesEnum.table)
+    else:
+        input_data = InputData(idx=np.arange(8),
+                               features=features, target=target, task=task, data_type=DataTypesEnum.table)
+    return input_data
 
 
 def get_data_with_string_columns():
-    file_path = os.path.join(project_root_path, 'test/data/data_with_mixed_column.csv')
+    file_path = fedot_project_root().joinpath('test/data/data_with_mixed_column.csv')
     df = pd.read_csv(file_path)
 
     task = Task(TaskTypesEnum.classification)
@@ -37,10 +57,10 @@ def generate_linear_pipeline():
     decreases (rfe_lin_class), the types change while keeping the number of
     columns ('label_encoding')
     """
-    encoding_label = PrimaryNode('label_encoding')
-    poly_node = SecondaryNode('poly_features', nodes_from=[encoding_label])
-    rfe_node = SecondaryNode('rfe_lin_class', nodes_from=[poly_node])
-    final_node = SecondaryNode('dt', nodes_from=[rfe_node])
+    encoding_label = PipelineNode('label_encoding')
+    poly_node = PipelineNode('poly_features', nodes_from=[encoding_label])
+    rfe_node = PipelineNode('rfe_lin_class', nodes_from=[poly_node])
+    final_node = PipelineNode('dt', nodes_from=[rfe_node])
     pipeline = Pipeline(final_node)
 
     return pipeline
@@ -53,47 +73,49 @@ def data_with_complicated_types():
     Column description by indices:
         0) int column with single np.nan value - nans must be filled in
         1) int column with nans more than 90% - column must be removed
-        2) int column with categorical values (number of unique values = 12) -
-        categorical indices must be converted into integers, then due to number
+        due to the fact that inf will be replaced with nans
+        2) int-float column with categorical values (number of unique values = 12) -
+        categorical indices must be converted into float, then due to number
         of unique values less than 13 - perform converting column into str type
         3) int column the same as 2) column but with additional 13th label in the test part
-        4) str-int column with words and numerical cells - must be removed because cann not
-        be converted into integers
-        5) int column (number of unique values = 4) - must be converted into string
+        4) int column (number of unique values = 4) - must be converted into string
+        5) str-int column with words and numerical cells - must be converted to int,
+        true str values replaced with nans and filled
         6) str column with unique categories 'a', 'b', 'c' and spaces in labels.
-        New category 'd' arise in the test part. Categories will be converted into float
-        7) str binary column - must be converted into integer
+        New category 'd' arise in the test part. Categories will be encoded using OHE
+        7) str binary column - must be converted into integer, nan cells must be filled in
         8) int binary column and nans - nan cells must be filled in
-        9) str column with truly int values as strings - must be converted into float column
-        10) str column with truly categorical values - must stay remained
+        9) str column with truly int values as strings - must be converted into float column,
+        '?' and 'error' must be replaced with nans and then filled in
+        10) str column with truly categorical values - must stay remained and encoded using OHE
     """
 
     task = Task(TaskTypesEnum.classification)
-    features = np.array([[0, np.nan, 1, 1, 1, 'monday', 'a ', 'true', 1, '0', 'a'],
+    features = np.array([[0, np.nan, 1, 1, 1, 'monday', 'a', 'true', 1, '0', 'a'],
                          [np.nan, 5, 2, 2, 0, 'tuesday', 'b', np.nan, 0, '1', np.inf],
                          [2, np.nan, 3, 3, np.nan, 3, 'c', 'false', 1, '?', 'c'],
-                         [3, np.nan, 4, 4, 3.0, 4, '  a  ', 'true', 0, '2', 'd'],
-                         [4, np.nan, 5, 5.0, 0, 5, '   b ', np.nan, 0, '3', 'e'],
-                         [5, np.nan, 6, 6, 0, 6, '   c  ', 'false', 0, '4', 'f'],
-                         [6, np.inf, 7, 7, 0, 7, '    a  ', 'true', 1, '5', 'g'],
-                         [7, np.inf, 8, 8, 1.0, 1, ' b   ', np.nan, 0, '6', 'h'],
+                         [3, np.nan, 4, 4, 3.0, 4, 'a', 'true', 0, 'error', 'd'],
+                         [4, np.nan, 5, 5.0, 0, 5, 'b', np.nan, 0, '3', 'e'],
+                         [5, np.nan, 6, 6, 0, 6, 'c', 'false', 0, '4', 'f'],
+                         [6, np.inf, 7, 7, 0, 7, 'a', 'true', 1, '5', 'g'],
+                         [7, np.inf, 8, 8, 1.0, 1, 'b', np.nan, 0, '6', 'h'],
                          [np.inf, np.inf, '9', '9', 2, 2, np.nan, 'true', 1, '7', 'i'],
-                         [9, np.inf, '10', '10', 2, 3, ' c  ', 'false', 0, '8', 'j'],
-                         [10, np.nan, 11.0, 11.0, 0, 4, 'c ', 'false', 0, '9', 'k'],
+                         [9, np.inf, '10', '10', 2, 3, 'c', 'false', 0, '8', 'j'],
+                         [10, np.nan, 11.0, 11.0, 0, 4, 'c', 'false', 0, '9', 'k'],
                          [11, np.nan, 12, 12, 2.0, 5, np.nan, 'false', 1, '10', 'l'],
-                         [12, np.nan, 1, 1.0, 1.0, 6, ' b  ', 'false', 0, '11', 'm'],
-                         [13, np.nan, 2, 2, 1, 7, ' c  ', 'true', np.nan, '12', 'n'],
+                         [12, np.nan, 1, 1.0, 1.0, 6, 'b', 'false', 0, '11', 'm'],
+                         [13, np.nan, 2, 2, 1, 7, 'c', 'true', np.nan, '12', 'n'],
                          [14, np.nan, 3, 3, 2.0, 1, 'a', 'false', np.nan, 'error', 'o'],
-                         [15, np.nan, 4, 4, 1, 2, 'a  ', 'false', np.nan, '13', 'p'],
-                         [16, 2, 5, 12, 0, 3, '   d       ', 'true', 1, '16', 'r'],
-                         [17, 3, 6, 13, 0, 4, '  d      ', 'false', 0, '17', 's']],
+                         [15, np.nan, 4, 4, 1, 2, 'a', 'false', np.nan, '13', 'p'],
+                         [16, 2, 5, 12, 0, 3, 'd', 'true', 1, '?', 'r'],
+                         [17, 3, 6, 13, 0, 4, 'd', 'false', 0, '17', 's']],
                         dtype=object)
     target = np.array([['no'], ['yes'], ['yes'], ['yes'], ['no'], ['no'], ['no'], ['no'], ['no'],
                        ['yes'], ['yes'], ['yes'], ['yes'], ['yes'], ['no'], ['no'], ['yes'], ['no']])
-    input_data = InputData(idx=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+    input_data = InputData(idx=np.arange(18),
                            features=features, target=target, task=task, data_type=DataTypesEnum.table)
 
-    return train_test_data_setup(input_data, split_ratio=0.9)
+    return train_test_data_setup(input_data, split_ratio=0.9, stratify=False)
 
 
 def test_column_types_converting_correctly():
@@ -107,13 +129,13 @@ def test_column_types_converting_correctly():
     types_corr = TableTypesCorrector()
     data = types_corr.convert_data_for_fit(data)
 
-    features_types = data.supplementary_data.column_types['features']
-    target_types = data.supplementary_data.column_types['target']
+    feature_type_ids = data.supplementary_data.col_type_ids['features']
+    target_type_ids = data.supplementary_data.col_type_ids['target']
 
-    assert len(features_types) == len(target_types) == 2
-    assert features_types[0] == "<class 'str'>"
-    assert features_types[1] == "<class 'str'>"
-    assert target_types[0] == target_types[0] == "<class 'str'>"
+    assert len(feature_type_ids) == 4
+    assert len(target_type_ids) == 2
+    assert (feature_type_ids[[0, 1, 2]] == TYPE_TO_ID[str]).all()
+    assert (target_type_ids == TYPE_TO_ID[str]).all()
 
 
 def test_column_types_process_correctly():
@@ -123,7 +145,7 @@ def test_column_types_process_correctly():
     """
 
     data = data_with_mixed_types_in_each_column()
-    train_data, test_data = train_test_data_setup(data, split_ratio=0.9)
+    train_data, test_data = train_test_data_setup(data, split_ratio=0.9, stratify=False)
 
     # Remove target from test sample
     test_data.target = None
@@ -132,30 +154,28 @@ def test_column_types_process_correctly():
     pipeline.fit(train_data)
     predicted = pipeline.predict(test_data)
 
-    features_columns = predicted.supplementary_data.column_types['features']
-    assert len(features_columns) == predicted.predict.shape[1]
+    feature_type_ids = predicted.supplementary_data.col_type_ids['features']
+    assert len(feature_type_ids) == predicted.predict.shape[1]
     # All output values are float
-    assert all('float' in str(feature_type) for feature_type in features_columns)
+    assert (feature_type_ids == TYPE_TO_ID[float]).all()
 
 
 def test_complicated_table_types_processed_correctly():
     """ Checking correctness of table type detection and type conversions """
     train_data, test_data = data_with_complicated_types()
 
-    pipeline = Pipeline(PrimaryNode('dt'))
-    pipeline = correct_preprocessing_params(pipeline, categorical_max_classes_th=13)
-    train_predicted = pipeline.fit(train_data, use_fitted=True)
+    pipeline = Pipeline(PipelineNode('dt'))
+    pipeline = correct_preprocessing_params(pipeline, categorical_max_uniques_th=13)
+    train_predicted = pipeline.fit(train_data)
     pipeline.predict(test_data)
 
     # Table types corrector after fitting
     types_correctors = pipeline.preprocessor.types_correctors
-    assert train_predicted.features.shape[1] == 52
-    # Column with id 2 was removed be data preprocessor and column with source id 5 became 4th
-    assert types_correctors[DEFAULT_SOURCE_NAME].columns_to_del[0] == 4
+    assert train_predicted.features.shape[1] == 57
     # Source id 9 became 7th - column must be converted into float
-    assert types_correctors[DEFAULT_SOURCE_NAME].categorical_into_float[0] == 7
+    assert types_correctors[DEFAULT_SOURCE_NAME].categorical_into_float[0] == 1
     # Three columns in the table must be converted into string
-    assert len(types_correctors[DEFAULT_SOURCE_NAME].numerical_into_str) == 3
+    assert len(types_correctors[DEFAULT_SOURCE_NAME].numerical_into_str) == 4
 
 
 def test_numerical_column_with_string_nans():
@@ -168,8 +188,97 @@ def test_numerical_column_with_string_nans():
 
     types_corr = TableTypesCorrector()
     # Set maximum allowed unique classes in categorical column
-    types_corr.categorical_max_classes_th = 5
+    types_corr.categorical_max_uniques_th = 5
     data = types_corr.convert_data_for_fit(input_data)
 
     n_rows, n_cols = data.features.shape
     assert n_cols == 1
+
+
+def test_binary_pseudo_string_column_process_correctly():
+    """ Checks if pseudo strings with int/float values in it process correctly with binary classification """
+    task = Task(TaskTypesEnum.classification)
+    features = np.array([['1'],
+                         ['1.0'],
+                         ['0.0'],
+                         ['1'],
+                         ['1.0'],
+                         ['0'],
+                         ['0.0'],
+                         ['1']], dtype=object)
+    target = np.array([['no'], ['yes'], ['yes'], ['yes'], ['no'], ['no'], ['no'], ['no']])
+    input_data = InputData(idx=np.arange(8),
+                           features=features, target=target, task=task, data_type=DataTypesEnum.table)
+
+    train_data, test_data = train_test_data_setup(input_data, split_ratio=0.9)
+
+    pipeline = Pipeline(PipelineNode('dt'))
+    pipeline = correct_preprocessing_params(pipeline)
+    train_predicted = pipeline.fit(train_data)
+
+    types_encountered = (
+        int, float,
+        np.int8, np.int16, np.int32, np.int64,
+        np.float16, np.float32, np.float64,
+    )
+
+    assert train_predicted.features.shape[1] == 1
+    assert all(isinstance(el[0], types_encountered) for el in train_predicted.features.to_numpy()) or \
+        all(isinstance(el[0], types_encountered) for el in train_predicted.features)
+
+
+def fit_predict_cycle_for_testing(idx: int):
+    input_data = get_mixed_data_with_str_and_float_values(idx=idx)
+    train_data, test_data = train_test_data_setup(input_data, split_ratio=0.9, stratify=False)
+
+    pipeline = Pipeline(PipelineNode('dt'))
+    pipeline = correct_preprocessing_params(pipeline)
+    train_predicted = pipeline.fit(train_data)
+    return train_predicted
+
+
+def test_mixed_column_with_str_and_float_values():
+    """ Checks if columns with different data type ratio process correctly """
+
+    # column with index 0 must be converted to string and encoded with OHE
+    train_predicted = fit_predict_cycle_for_testing(idx=0)
+    assert train_predicted.features.shape[1] == 5
+    assert isinstance(train_predicted.features, pd.DataFrame) or \
+        all(isinstance(el, np.ndarray) for el in train_predicted.features)
+
+    # column with index 1 must be converted to float and the gaps must be filled
+    train_predicted = fit_predict_cycle_for_testing(idx=1)
+
+    types_encountered = (
+        int, float,
+        np.int8, np.int16, np.int32, np.int64,
+        np.float16, np.float32, np.float64,
+    )
+
+    assert train_predicted.features.shape[1] == 1
+    assert all(isinstance(el[0], types_encountered) for el in train_predicted.features.to_numpy()) or \
+        all(isinstance(el[0], types_encountered) for el in train_predicted.features)
+
+    # column with index 2 must be removed due to unclear type of data
+    try:
+        _ = fit_predict_cycle_for_testing(idx=2)
+    except ValueError:
+        pass
+
+
+def test_str_numbers_with_dots_and_commas_in_predict():
+    """ Checks that if training part type was defined as int than predict part will be correctly
+    converted to ints even if it contains str with dots/commas"""
+    task = Task(TaskTypesEnum.classification)
+    features = np.array([['8,5'],
+                         ['4.9'],
+                         ['3,2'],
+                         ['6.1']], dtype=object)
+    target = np.array([['no'], ['yes'], ['yes'], ['yes']])
+    input_data = InputData(idx=np.arange(4),
+                           features=features, target=target, task=task, data_type=DataTypesEnum.table)
+
+    transformed_predict = apply_type_transformation(table=input_data.features, col_type_ids=[TYPE_TO_ID[int]],
+                                                    log=default_log('test_str_numbers_with_dots_and_commas_in_predict'))
+
+    assert all(transformed_predict == np.array([[8], [4], [3], [6]]))

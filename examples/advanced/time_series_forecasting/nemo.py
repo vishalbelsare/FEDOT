@@ -1,17 +1,17 @@
 import warnings
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 
-from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
 from fedot.core.data.data import InputData
 from fedot.core.data.multi_modal import MultiModalData
-
+from fedot.core.pipelines.node import PipelineNode
+from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
-from copy import deepcopy
+
 warnings.filterwarnings('ignore')
 
 
@@ -54,8 +54,8 @@ def get_arima_pipeline():
         arima
     """
 
-    node_1 = PrimaryNode('arima')
-    node_final = SecondaryNode('linear', nodes_from=[node_1])
+    node_1 = PipelineNode('arima')
+    node_final = PipelineNode('linear', nodes_from=[node_1])
 
     pipeline = Pipeline(node_final)
     return pipeline
@@ -68,32 +68,31 @@ def get_arima_nemo_pipeline():
         nemo  |
     """
 
-    node_arima = PrimaryNode('arima')
-    node_nemo = PrimaryNode('exog_ts')
-    node_final = SecondaryNode('ridge', nodes_from=[node_arima, node_nemo])
+    node_arima = PipelineNode('arima')
+    node_nemo = PipelineNode('exog_ts')
+    node_final = PipelineNode('ridge', nodes_from=[node_arima, node_nemo])
     pipeline = Pipeline(node_final)
     return pipeline
 
 
 def return_working_pipeline():
-    node_lagged_1 = PrimaryNode('lagged/1')
-    node_exog = PrimaryNode('exog_ts')
+    node_lagged_1 = PipelineNode('lagged/1')
+    node_exog = PipelineNode('exog_ts')
 
-    node_final = SecondaryNode('ridge', nodes_from=[node_lagged_1, node_exog])
+    node_final = PipelineNode('ridge', nodes_from=[node_lagged_1, node_exog])
     pipeline = Pipeline(node_final)
     return pipeline
 
 
 len_forecast = 40
 ts_name = 'sea_level'
-path_to_file = '../../cases/data/nemo/sea_surface_height.csv'
-path_to_exog_file = '../../cases/data/nemo/sea_surface_height_nemo.csv'
+path_to_file = '../../examples/real_cases/data/nemo/sea_surface_height.csv'
+path_to_exog_file = '../../examples/real_cases/data/nemo/sea_surface_height_nemo.csv'
 
 df = pd.read_csv(path_to_file)
 time_series = np.array(df[ts_name])
 df = pd.read_csv(path_to_exog_file)
 exog_variable = np.array(df[ts_name])
-
 
 # Let's divide our data on train and test samples
 train_data = time_series[:-len_forecast]
@@ -117,11 +116,11 @@ train_input_exog, predict_input_exog, _ = prepare_input_data(len_forecast=len_fo
 
 pipeline = get_arima_pipeline()
 train_dataset = MultiModalData({
-        'arima': deepcopy(train_input),
-    })
+    'arima': deepcopy(train_input),
+})
 predict_dataset = MultiModalData({
-        'arima': deepcopy(predict_input),
-    })
+    'arima': deepcopy(predict_input),
+})
 pipeline.fit_from_scratch(train_dataset)
 predicted_values = pipeline.predict(predict_dataset)
 predicted_values = predicted_values.predict
@@ -140,13 +139,13 @@ print(f'ARIMA MAPE - {mape_before:.4f}\n')
 # arima with nemo ensemble
 pipeline = return_working_pipeline()
 train_dataset = MultiModalData({
-        'lagged/1': deepcopy(train_input),
-        'exog_ts': deepcopy(train_input_exog)
-    })
+    'lagged/1': deepcopy(train_input),
+    'exog_ts': deepcopy(train_input_exog)
+})
 predict_dataset = MultiModalData({
-        'lagged/1': deepcopy(predict_input),
-        'exog_ts': deepcopy(predict_input_exog)
-    })
+    'lagged/1': deepcopy(predict_input),
+    'exog_ts': deepcopy(predict_input_exog)
+})
 pipeline.fit_from_scratch(train_dataset)
 predicted_values = pipeline.predict(predict_dataset).predict
 
@@ -165,13 +164,13 @@ print(f'Lagged with nemo MAPE - {mape_before:.4f}\n')
 # arima with nemo ensemble
 pipeline = get_arima_nemo_pipeline()
 train_dataset = MultiModalData({
-        'arima': deepcopy(train_input),
-        'exog_ts': deepcopy(train_input_exog)
-    })
+    'arima': deepcopy(train_input),
+    'exog_ts': deepcopy(train_input_exog)
+})
 predict_dataset = MultiModalData({
-        'arima': deepcopy(predict_input),
-        'exog_ts': deepcopy(predict_input_exog)
-    })
+    'arima': deepcopy(predict_input),
+    'exog_ts': deepcopy(predict_input_exog)
+})
 pipeline.fit_from_scratch(train_dataset)
 predicted_values = pipeline.predict(predict_dataset).predict
 

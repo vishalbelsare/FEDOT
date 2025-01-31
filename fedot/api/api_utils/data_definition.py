@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from functools import partial
-from typing import Union
+from os import PathLike
+from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
@@ -11,10 +11,13 @@ from fedot.core.data.multi_modal import MultiModalData
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
 
+FeaturesType = Union[str, PathLike, np.ndarray, pd.DataFrame, InputData, MultiModalData, dict, tuple]
+TargetType = Union[str, PathLike, np.ndarray, pd.Series, dict]
+
 
 class DataDefiner:
 
-    def __init__(self, strategy) -> None:
+    def __init__(self, strategy: 'StrategyDefineData') -> None:
         self._strategy = strategy
 
     @property
@@ -25,12 +28,12 @@ class DataDefiner:
     def strategy(self, strategy) -> None:
         self._strategy = strategy
 
-    def define_data(self, features: Union[tuple, str, np.ndarray, pd.DataFrame, InputData],
-                    ml_task: Task,
-                    target: str = None,
-                    is_predict: bool = False) -> None:
+    def define_data(self, features: FeaturesType,
+                    task: Task,
+                    target: Optional[str] = None,
+                    is_predict: bool = False) -> Union[InputData, MultiModalData]:
         return self._strategy.define_data(features,
-                                          ml_task,
+                                          task,
                                           target,
                                           is_predict)
 
@@ -38,31 +41,31 @@ class DataDefiner:
 class StrategyDefineData(ABC):
     @abstractmethod
     def define_data(self, features: Union[tuple, str, np.ndarray, pd.DataFrame, InputData],
-                    ml_task: Task,
+                    task: Task,
                     target: str = None,
-                    is_predict: bool = False):
+                    is_predict: bool = False) -> Union[InputData, MultiModalData]:
         pass
 
 
 class FedotStrategy(StrategyDefineData):
-    def define_data(self, features: InputData,
-                    ml_task: Task,
+    def define_data(self, features: Union[InputData, MultiModalData],
+                    task: Task,
                     target: str = None,
-                    is_predict: bool = False) -> InputData:
-        # InputData format for input data
+                    is_predict: bool = False) -> Union[InputData, MultiModalData]:
+        # InputData or MultiModalData format for input data
         data = deepcopy(features)
-        data.task = ml_task
+        data.task = task
         return data
 
 
 class TupleStrategy(StrategyDefineData):
     def define_data(self, features: tuple,
-                    ml_task: Task,
+                    task: Task,
                     target: str = None,
                     is_predict: bool = False) -> InputData:
         data = array_to_input_data(features_array=features[0],
                                    target_array=features[1],
-                                   task=ml_task)
+                                   task=task)
         return data
 
 
@@ -70,102 +73,118 @@ class PandasStrategy(StrategyDefineData):
     """ Class for wrapping pandas DataFrames into InputData """
 
     def define_data(self, features: pd.DataFrame,
-                    ml_task: Task,
+                    task: Task,
                     target: str = None,
                     is_predict: bool = False) -> InputData:
         if target is None:
             target = np.array([])
 
-        if isinstance(target, str) and target in features.columns:
-            target_array = features[target]
-            del features[target]
+        if isinstance(target, str):
+            if target in features.columns:
+                target_array = features[target]
+                features = features.drop(columns=target)
+            else:
+                target_array = np.array([])
         else:
             target_array = target
 
         data = array_to_input_data(features_array=np.asarray(features),
                                    target_array=np.asarray(target_array),
-                                   task=ml_task)
+                                   task=task)
         return data
 
 
 class NumpyStrategy(StrategyDefineData):
     def define_data(self, features: np.ndarray,
-                    ml_task: Task,
-                    target: str = None,
+                    task: Task,
+                    target: Optional[int] = None,
                     is_predict: bool = False) -> InputData:
         # numpy format for input data
         if target is None:
             target = np.array([])
 
-        if isinstance(target, str):
-            target_array = features[target]
-            del features[target]
+        if task.task_type is TaskTypesEnum.ts_forecasting:
+            target_array = features
+        elif isinstance(target, int):
+            if target < features.shape[1]:
+                target_array = features[:, target]
+                features = np.delete(features, target, axis=1)
+            else:
+                target_array = np.array([])
         else:
             target_array = target
 
         data = array_to_input_data(features_array=features,
                                    target_array=target_array,
-                                   task=ml_task)
+                                   task=task)
         return data
 
 
 class CsvStrategy(StrategyDefineData):
-    def define_data(self, features: str,
-                    ml_task: Task,
+    def define_data(self, features: Union[str, PathLike],
+                    task: Task,
                     target: str = None,
                     is_predict: bool = False) -> InputData:
         # CSV files as input data, by default - table data
 
-        data_type = DataTypesEnum.table
-        if ml_task.task_type == TaskTypesEnum.ts_forecasting:
+        if task.task_type == TaskTypesEnum.ts_forecasting:
             # For time series forecasting format - time series
-            data = InputData.from_csv_time_series(task=ml_task,
+            data = InputData.from_csv_time_series(task=task,
                                                   file_path=features,
                                                   target_column=target,
                                                   is_predict=is_predict)
         else:
             # Make default features table
             # CSV files as input data
-            data = InputData.from_csv(features, task=ml_task,
+            data = InputData.from_csv(features, task=task,
                                       target_columns=target,
-                                      data_type=data_type)
+                                      data_type=DataTypesEnum.table)
         return data
 
 
-class MulitmodalStrategy(StrategyDefineData):
-    # TODO data source must be defined dy data type, not task - temporary
-    source_name_by_task = {'classification': 'data_source_table',
-                           'regression': 'data_source_table',
-                           'ts_forecasting': 'data_source_ts'}
+class MultimodalStrategy(StrategyDefineData):
+    """
+    Gets dict of NumPy arrays or InputData sources as input data
+    and returns MultiModalData object with source names defined by data type
+    """
+    source_name_by_type = {'table': 'data_source_table',
+                           'ts': 'data_source_ts',
+                           'multi_ts': 'data_source_ts',
+                           'text': 'data_source_text',
+                           'image': 'data_source_image'}
 
     def define_data(self, features: dict,
-                    ml_task: Task,
+                    task: Task,
                     target: str = None,
                     is_predict: bool = False,
                     idx=None) -> MultiModalData:
-        if target is None:
-            target = np.array([])
-        target_array = target
 
-        data_part_transformation_func = partial(array_to_input_data, target_array=target_array, task=ml_task)
-
+        # change data type to InputData
+        for source, inner_data in features.items():
+            if not isinstance(inner_data, InputData):
+                features[source] = array_to_input_data(features_array=inner_data, target_array=target,
+                                                       task=task, idx=idx)
         # create labels for data sources
-        data_source_name = self.source_name_by_task.get(ml_task.task_type.name)
-        sources = dict((f'{data_source_name}/{data_part_key}', data_part_transformation_func(features_array=data_part))
+        sources = dict((f'{self.source_name_by_type.get(features[data_part_key].data_type.name)}/{data_part_key}',
+                        data_part)
                        for (data_part_key, data_part) in features.items())
         data = MultiModalData(sources)
         return data
 
 
-def data_strategy_selector(features, target, ml_task: Task = None, is_predict: bool = None):
-    data_type = type(features)
-    strategy_dict = {InputData: FedotStrategy(),
-                     MultiModalData: FedotStrategy(),
-                     tuple: TupleStrategy(),
-                     pd.DataFrame: PandasStrategy(),
-                     np.ndarray: NumpyStrategy(),
-                     str: CsvStrategy(),
-                     dict: MulitmodalStrategy()}
+def data_strategy_selector(features: FeaturesType, target: Optional[str] = None, task: Task = None,
+                           is_predict: bool = None) -> Union[InputData, MultiModalData]:
+    strategy = [strategy for cls, strategy in _strategy_dispatch.items() if isinstance(features, cls)][0]
 
-    data = DataDefiner(strategy_dict[data_type])
-    return data.define_data(features, ml_task, target, is_predict)
+    data = DataDefiner(strategy())
+    return data.define_data(features, task, target, is_predict)
+
+
+_strategy_dispatch = {InputData: FedotStrategy,
+                      MultiModalData: FedotStrategy,
+                      tuple: TupleStrategy,
+                      pd.DataFrame: PandasStrategy,
+                      np.ndarray: NumpyStrategy,
+                      str: CsvStrategy,
+                      PathLike: CsvStrategy,
+                      dict: MultimodalStrategy}

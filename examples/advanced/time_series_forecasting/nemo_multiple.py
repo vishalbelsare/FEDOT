@@ -9,7 +9,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
 from fedot.core.data.multi_modal import MultiModalData
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TsForecastingParams, TaskTypesEnum
@@ -41,7 +41,7 @@ def prepare_data(time_series, exog_variable, len_forecast=250):
     predict_input_exog = InputData(idx=np.arange(len(exog_variable)),
                                    features=exog_variable, target=time_series,
                                    task=task, data_type=DataTypesEnum.ts)
-    train_input_exog, _ = train_test_data_setup(predict_input_exog)
+    train_input_exog, predict_input_exog = train_test_data_setup(predict_input_exog)
 
     return train_input, predict_input, train_input_exog, predict_input_exog, predict_input.target
 
@@ -53,9 +53,9 @@ def get_arima_nemo_pipeline():
         nemo  |
     """
 
-    node_arima = PrimaryNode('arima')
-    node_nemo = PrimaryNode('exog_ts')
-    node_final = SecondaryNode('linear', nodes_from=[node_arima, node_nemo])
+    node_arima = PipelineNode('arima')
+    node_nemo = PipelineNode('exog_ts')
+    node_final = PipelineNode('linear', nodes_from=[node_arima, node_nemo])
     pipeline = Pipeline(node_final)
     return pipeline
 
@@ -67,10 +67,10 @@ def get_stlarima_nemo_pipeline():
             nemo  |
     """
 
-    node_arima = PrimaryNode('stl_arima')
-    node_arima.custom_params = {'period': 80, 'p': 2, 'd': 1, 'q': 0}
-    node_nemo = PrimaryNode('exog_ts')
-    node_final = SecondaryNode('linear', nodes_from=[node_arima, node_nemo])
+    node_arima = PipelineNode('stl_arima')
+    node_arima.parameters = {'period': 80, 'p': 2, 'd': 1, 'q': 0}
+    node_nemo = PipelineNode('exog_ts')
+    node_final = PipelineNode('linear', nodes_from=[node_arima, node_nemo])
     pipeline = Pipeline(node_final)
     return pipeline
 
@@ -84,13 +84,13 @@ def get_ridge_nemo_pipeline():
                           nemo  /
     """
 
-    node_lagged_1 = PrimaryNode('lagged/1')
-    node_ridge_1 = SecondaryNode('ridge', nodes_from=[node_lagged_1])
-    node_lagged_2 = PrimaryNode('lagged/2')
-    node_ridge_2 = SecondaryNode('ridge', nodes_from=[node_lagged_2])
-    node_ridge_3 = SecondaryNode('ridge', nodes_from=[node_ridge_1, node_ridge_2])
-    node_nemo = PrimaryNode('exog_ts')
-    node_final = SecondaryNode('linear', nodes_from=[node_ridge_3, node_nemo])
+    node_lagged_1 = PipelineNode('lagged/1')
+    node_ridge_1 = PipelineNode('ridge', nodes_from=[node_lagged_1])
+    node_lagged_2 = PipelineNode('lagged/2')
+    node_ridge_2 = PipelineNode('ridge', nodes_from=[node_lagged_2])
+    node_ridge_3 = PipelineNode('ridge', nodes_from=[node_ridge_1, node_ridge_2])
+    node_nemo = PipelineNode('exog_ts')
+    node_final = PipelineNode('linear', nodes_from=[node_ridge_3, node_nemo])
     pipeline = Pipeline(node_final)
     return pipeline
 
@@ -100,7 +100,7 @@ def get_arima_pipeline():
         arima
     """
 
-    node_final = PrimaryNode('arima')
+    node_final = PipelineNode('arima')
 
     pipeline = Pipeline(node_final)
     return pipeline
@@ -111,8 +111,8 @@ def get_stlarima_pipeline():
         stl_arima
     """
 
-    node_final = PrimaryNode('stl_arima')
-    node_final.custom_params = {'period': 80, 'p': 2, 'd': 1, 'q': 0}
+    node_final = PipelineNode('stl_arima')
+    node_final.parameters = {'period': 80, 'p': 2, 'd': 1, 'q': 0}
     pipeline = Pipeline(node_final)
     return pipeline
 
@@ -124,14 +124,14 @@ def get_ridge_pipeline():
         lagged -> ridge  |
     """
 
-    node_lagged_1 = PrimaryNode('lagged/1')
-    node_ridge_1 = SecondaryNode('ridge', nodes_from=[node_lagged_1])
+    node_lagged_1 = PipelineNode('lagged/1')
+    node_ridge_1 = PipelineNode('ridge', nodes_from=[node_lagged_1])
 
-    node_lagged_2 = PrimaryNode('lagged/2')
+    node_lagged_2 = PipelineNode('lagged/2')
 
-    node_ridge_2 = SecondaryNode('ridge', nodes_from=[node_lagged_2])
+    node_ridge_2 = PipelineNode('ridge', nodes_from=[node_lagged_2])
 
-    node_final = SecondaryNode('ridge', nodes_from=[node_ridge_1, node_ridge_2])
+    node_final = PipelineNode('ridge', nodes_from=[node_ridge_1, node_ridge_2])
     pipeline = Pipeline(node_final)
     return pipeline
 
@@ -146,7 +146,7 @@ def compare_plot(predicted, real, forecast_length, model):
     plt.show()
 
 
-def run_nemo_based_forecasting(time_series, exog_variable, len_forecast=60, is_visualise=False):
+def run_nemo_based_forecasting(time_series, exog_variable, len_forecast=60, visualization=False):
     errors_df = {}
 
     train_input, predict_input, train_input_exog, predict_input_exog, test_data = \
@@ -154,16 +154,17 @@ def run_nemo_based_forecasting(time_series, exog_variable, len_forecast=60, is_v
                      exog_variable=exog_variable,
                      len_forecast=len_forecast)
 
-    pipelines = {'ARIMA': {
-        'tr_nodes_data': {"arima": train_input},
-        'pr_nodes_data': {"arima": predict_input},
-        'model': get_arima_pipeline()
-    },
-        'STL_ARIMA': {
-            'tr_nodes_data': {"stl_arima": train_input},
-            'pr_nodes_data': {"stl_arima": predict_input},
-            'model': get_stlarima_pipeline()
-        },
+    pipelines = {
+        'ARIMA':
+            {'tr_nodes_data': {"arima": train_input},
+             'pr_nodes_data': {"arima": predict_input},
+             'model': get_arima_pipeline()
+             },
+        'STL_ARIMA':
+            {'tr_nodes_data': {"stl_arima": train_input},
+             'pr_nodes_data': {"stl_arima": predict_input},
+             'model': get_stlarima_pipeline()
+             },
         'RIDGE':
             {'tr_nodes_data': {"lagged/1": train_input, "lagged/2": train_input},
              'pr_nodes_data': {"lagged/1": predict_input, "lagged/2": predict_input},
@@ -223,7 +224,7 @@ def run_nemo_based_forecasting(time_series, exog_variable, len_forecast=60, is_v
         errors_df[model_name + '_MAE'] = mae_before
         errors_df[model_name + '_MAPE'] = mape_before
 
-        if is_visualise:
+        if visualization:
             compare_plot(predicted, test_data, len_forecast, model_name)
             print(model_name)
             print(f' MSE - {mse_before:.4f}')
@@ -245,10 +246,10 @@ def boxplot_visualize(df, label):
     plt.show()
 
 
-def run_single_example(len_forecast=40, is_visualise=True):
+def run_single_example(len_forecast=40, visualization=False):
     ts_name = 'sea_level'
-    path_to_file = '../../cases/data/nemo/sea_surface_height.csv'
-    path_to_exog_file = '../../cases/data/nemo/sea_surface_height_nemo.csv'
+    path_to_file = '../../examples/real_cases/data/nemo/sea_surface_height.csv'
+    path_to_exog_file = '../../examples/real_cases/data/nemo/sea_surface_height_nemo.csv'
 
     df = pd.read_csv(path_to_file)
     time_series = df[ts_name]
@@ -258,7 +259,7 @@ def run_single_example(len_forecast=40, is_visualise=True):
     run_nemo_based_forecasting(time_series=time_series,
                                exog_variable=exog_variable,
                                len_forecast=len_forecast,
-                               is_visualise=is_visualise)
+                               visualization=visualization)
 
 
 def create_errors_df():
@@ -269,18 +270,20 @@ def create_errors_df():
 
 
 def add_data_to_errors_df(df, error_name, point, errors):
-    df = df.append({'POINT': point,
-                    'RIDGE': errors['RIDGE_' + error_name],
-                    'RIDGE_NEMO': errors['RIDGE_NEMO_' + error_name],
-                    'ARIMA': errors['ARIMA_' + error_name],
-                    'ARIMA_NEMO': errors['ARIMA_NEMO_' + error_name],
-                    'STL_ARIMA': errors['STL_ARIMA_' + error_name],
-                    'STL_ARIMA_NEMO': errors['STL_ARIMA_NEMO_' + error_name],
-                    }, ignore_index=True)
+    more_data = pd.DataFrame({
+        'POINT': point,
+        'RIDGE': errors['RIDGE_' + error_name],
+        'RIDGE_NEMO': errors['RIDGE_NEMO_' + error_name],
+        'ARIMA': errors['ARIMA_' + error_name],
+        'ARIMA_NEMO': errors['ARIMA_NEMO_' + error_name],
+        'STL_ARIMA': errors['STL_ARIMA_' + error_name],
+        'STL_ARIMA_NEMO': errors['STL_ARIMA_NEMO_' + error_name],
+    }, index=[0])
+    df = pd.concat([df, more_data], ignore_index=True)
     return df
 
 
-def run_multiple_example(path_to_file, path_to_exog_file, out_path=None, is_boxplot_visualize=True, len_forecast=40):
+def run_multiple_example(path_to_file, path_to_exog_file, out_path=None, visualization=False, len_forecast=40):
     mse_errors_df = create_errors_df()
     mae_errors_df = create_errors_df()
     mape_errors_df = create_errors_df()
@@ -299,7 +302,7 @@ def run_multiple_example(path_to_file, path_to_exog_file, out_path=None, is_boxp
             errors = run_nemo_based_forecasting(time_series=time_series,
                                                 exog_variable=exog_variable,
                                                 len_forecast=len_forecast,
-                                                is_visualise=False)
+                                                visualization=visualization)
 
             mse_errors_df = add_data_to_errors_df(mse_errors_df, 'MSE', point, errors)
             mae_errors_df = add_data_to_errors_df(mae_errors_df, 'MAE', point, errors)
@@ -310,22 +313,22 @@ def run_multiple_example(path_to_file, path_to_exog_file, out_path=None, is_boxp
         mae_errors_df.to_csv(os.path.join(out_path, 'mae_errors.csv'), index=False)
         mape_errors_df.to_csv(os.path.join(out_path, 'mape_errors.csv'), index=False)
 
-    if is_boxplot_visualize:
+    if visualization:
         boxplot_visualize(mse_errors_df, 'MSE')
         boxplot_visualize(mae_errors_df, 'MAE')
         boxplot_visualize(mape_errors_df, 'MAPE')
 
 
-def run_prediction_examples(mode='single'):
+def run_prediction_examples(mode='single', visualization=False):
     if mode == 'single':
-        run_single_example(len_forecast=40, is_visualise=True)
+        run_single_example(len_forecast=40, visualization=visualization)
     if mode == 'multiple':
-        run_multiple_example(path_to_file='../../cases/data/nemo/SSH_points_grid.csv',
-                             path_to_exog_file='../../cases/data/nemo/SSH_nemo_points_grid.csv',
+        run_multiple_example(path_to_file='../../examples/real_cases/data/nemo/SSH_points_grid.csv',
+                             path_to_exog_file='../../examples/real_cases/data/nemo/SSH_nemo_points_grid.csv',
                              out_path=None,
                              len_forecast=30,
-                             is_boxplot_visualize=True)
+                             visualization=visualization)
 
 
 if __name__ == '__main__':
-    run_prediction_examples(mode='multiple')
+    run_prediction_examples(mode='multiple', visualization=True)

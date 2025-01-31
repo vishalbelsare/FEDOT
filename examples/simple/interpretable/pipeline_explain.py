@@ -1,4 +1,5 @@
 import os
+
 import pandas as pd
 
 from examples.simple.classification.classification_pipelines import classification_complex_pipeline
@@ -9,7 +10,7 @@ from fedot.explainability.explainers import explain_pipeline
 
 def run_pipeline_explain():
     # Specifying paths
-    train_data_path = os.path.join(fedot_project_root(), 'cases', 'data', 'cancer', 'cancer_train.csv')
+    train_data_path = os.path.join(fedot_project_root(), 'examples', 'real_cases', 'data', 'cancer', 'cancer_train.csv')
     figure_path = 'pipeline_explain_example.png'
 
     # Feature and class names for visualization
@@ -25,10 +26,10 @@ def run_pipeline_explain():
     pipeline = classification_complex_pipeline()
 
     # Pipeline fitting
-    pipeline.fit(train_data, use_fitted=False)
+    pipeline.fit(train_data)
 
     # Pipeline explaining
-    explainer = explain_pipeline(pipeline, data=train_data, method='surrogate_dt', visualize=False)
+    explainer = explain_pipeline(pipeline, data=train_data, method='surrogate_dt', visualization=True)
 
     # Visualizing explanation and saving the plot
     print(f'Built surrogate model: {explainer.surrogate_str}')

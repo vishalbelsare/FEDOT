@@ -1,8 +1,9 @@
 import argparse
 from argparse import RawTextHelpFormatter
+from pathlib import Path
+
+from fedot import Fedot
 from fedot.core.repository.tasks import TsForecastingParams
-from fedot.api.main import Fedot
-import os
 
 
 def create_parser(arguments_list):
@@ -32,12 +33,9 @@ def add_args_to_parser(parser, tag: str, help: str, required: bool = False, is_l
 
 def separate_argparse_to_fedot(parameters):
     """ Function for separating argparse parameters on fedot fit/predict/composer"""
-    composer_params = {}
     main_params = {}
     fit_params = {}
     for arg in vars(parameters):
-        if arg in composer_params_names:
-            composer_params[keys_names[arg]] = getattr(parameters, arg)
         if arg in main_params_names:
             main_params[keys_names[arg]] = getattr(parameters, arg)
         if arg in fit_params_names:
@@ -48,11 +46,11 @@ def separate_argparse_to_fedot(parameters):
     elif main_params['problem'] == 'ts_forecasting' and getattr(parameters, 'for_len') is None:
         raise ValueError("Forecast length (for_len) is necessary parameter for ts_forecasting problem")
 
-    if composer_params['with_tuning'] == '1':
-        composer_params['with_tuning'] = True
+    if main_params['with_tuning'] == '1':
+        main_params['with_tuning'] = True
     else:
-        composer_params['with_tuning'] = False
-    return composer_params, main_params, fit_params
+        main_params['with_tuning'] = False
+    return main_params, fit_params
 
 
 def preprocess_keys(parameters: dict):
@@ -63,7 +61,7 @@ def preprocess_keys(parameters: dict):
     for k, v in list(parameters.items()):
         if v is None:
             del parameters[k]
-        elif type(v) is not bool:
+        elif not isinstance(v, bool):
             try:
                 parameters[k] = float(v)
             except Exception:
@@ -76,18 +74,17 @@ def run_fedot(parameters, main_params, fit_params, save_predictions=True):
     print("\nFitting start...")
     model.fit(**fit_params)
     print("\nPrediction start...")
-    prediction = model.predict(features=getattr(parameters, 'test'), save_predictions=save_predictions)
-    print(f"\nPrediction saved at {os.getcwd()}\\predictions.csv")
+    prediction = model.predict(features=getattr(parameters, 'test'), in_sample=False, save_predictions=save_predictions)
+    print(f"\nPrediction saved at {Path.cwd().joinpath('predictions.csv')}")
     return prediction
 
 
 # parameters to init Fedot class
-main_params_names = ['problem', 'preset', 'timeout', 'seed']
+main_params_names = ['problem', 'timeout', 'seed', 'depth', 'arity', 'popsize', 'gen_num',
+                     'opers', 'tuning', 'cv_folds', 'hist_path', 'preset']
 # parameters to fit model
 fit_params_names = ['train', 'target']
-# composer parameters
-composer_params_names = ['depth', 'arity', 'popsize', 'gen_num',
-                         'opers', 'tuning', 'cv_folds', 'val_bl', 'hist_path']
+
 # dictionary with keys for parser creation
 arguments_dicts = [{'tag': '--problem',
                     'help': 'The name of modelling problem to solve: \n'
@@ -131,8 +128,6 @@ arguments_dicts = [{'tag': '--problem',
                     'help': 'Composer parameter: 1 - with tuning, 0 - without tuning'},
                    {'tag': '--cv_folds',
                     'help': 'Composer parameter: Number of folds for cross-validation'},
-                   {'tag': '--val_bl',
-                    'help': 'Composer parameter: Number of validation blocks for time series forecasting'},
                    {'tag': '--hist_path',
                     'help': 'Composer parameter: Name of the folder for composing history'},
                    {'tag': '--for_len',
@@ -152,8 +147,7 @@ keys_names = {'problem': 'problem',
               'opers': 'available_operations',
               'tuning': 'with_tuning',
               'cv_folds': 'cv_folds',
-              'val_bl': 'validation_blocks',
-              'hist_path': 'history_folder',
+              'hist_path': 'history_dir',
               'for_len': 'forecast_length'
               }
 
@@ -162,13 +156,11 @@ def run_cli():
     parser = create_parser(arguments_dicts)
     parameters = parser.parse_args()
 
-    composer_params, main_params, fit_params = separate_argparse_to_fedot(parameters)
+    main_params, fit_params = separate_argparse_to_fedot(parameters)
 
     preprocess_keys(main_params)
-    preprocess_keys(composer_params)
     preprocess_keys(fit_params)
 
-    main_params['composer_params'] = composer_params
     run_fedot(parameters, main_params, fit_params)
 
 

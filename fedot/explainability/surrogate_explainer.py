@@ -10,7 +10,7 @@ from sklearn.tree._tree import TREE_LEAF
 from fedot.core.composer.metrics import Metric
 from fedot.core.composer.metrics import R2, F1
 from fedot.core.data.data import InputData
-from fedot.core.pipelines.node import PrimaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.tasks import TaskTypesEnum
 from fedot.explainability.explainer_template import Explainer
@@ -44,9 +44,10 @@ class SurrogateExplainer(Explainer):
             raise ValueError(f'{type(surrogate)} is not supported as a surrogate model')
 
         self.surrogate_str = surrogate
-        self.surrogate = get_simple_pipeline(self.surrogate_str, self.surrogates_default_params[surrogate])
+        self.surrogate = get_simple_pipeline(self.surrogate_str, self.surrogates_default_params[surrogate],
+                                             model.use_input_preprocessing)
 
-    def explain(self, data: InputData, visualize: bool = True, **kwargs):
+    def explain(self, data: InputData, visualization: bool = False, **kwargs):
         try:
             self.score = fit_naive_surrogate_model(self.model, self.surrogate, data)
 
@@ -58,7 +59,7 @@ class SurrogateExplainer(Explainer):
         if self.surrogate_str in ('dt', 'dtreg'):
             prune_duplicate_leaves(self.surrogate.root_node.fitted_operation)
 
-        if visualize:
+        if visualization:
             self.visualize(**kwargs)
 
     def visualize(self, dpi: int = 100, figsize=(48, 12), save_path: str = None, **kwargs):
@@ -93,11 +94,12 @@ class SurrogateExplainer(Explainer):
             print(f'Saved the plot to "{os.path.abspath(save_path)}"')
 
 
-def get_simple_pipeline(model: str, custom_params: dict = None) -> 'Pipeline':
-    surrogate_node = PrimaryNode(model)
+def get_simple_pipeline(model: str, custom_params: dict = None,
+                        use_input_preprocessing: bool = True) -> 'Pipeline':
+    surrogate_node = PipelineNode(model)
     if custom_params:
-        surrogate_node.custom_params = custom_params
-    return Pipeline(surrogate_node)
+        surrogate_node.parameters = custom_params
+    return Pipeline(surrogate_node, use_input_preprocessing=use_input_preprocessing)
 
 
 def fit_naive_surrogate_model(

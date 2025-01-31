@@ -1,15 +1,16 @@
-import tensorflow as tf
-import random
+from golem.utilities.requirements_notificator import warn_requirement
 
-import numpy as np
+try:
+    import tensorflow as tf
+except ModuleNotFoundError:
+    warn_requirement('tensorflow', 'fedot[extra]')
+
 from sklearn.metrics import roc_auc_score as roc_auc
 
 from examples.simple.classification.classification_pipelines import cnn_composite_pipeline
 from fedot.core.data.data import InputData, OutputData
 from fedot.core.repository.tasks import Task, TaskTypesEnum
-
-random.seed(1)
-np.random.seed(1)
+from fedot.core.utils import set_random_seed
 
 
 def calculate_validation_metric(predicted: OutputData, dataset_to_validate: InputData) -> float:
@@ -40,12 +41,12 @@ def run_image_classification_problem(train_dataset: tuple,
     predictions = pipeline.predict(dataset_to_validate)
     roc_auc_on_valid = calculate_validation_metric(predictions,
                                                    dataset_to_validate)
-    print(f'ROCAUC: {roc_auc_on_valid}')
-
     return roc_auc_on_valid, dataset_to_train, dataset_to_validate
 
 
 if __name__ == '__main__':
+    set_random_seed(1)
+
     training_set, testing_set = tf.keras.datasets.mnist.load_data(path='mnist.npz')
     roc_auc_on_valid, dataset_to_train, dataset_to_validate = run_image_classification_problem(
         train_dataset=training_set,

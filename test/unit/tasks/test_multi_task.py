@@ -1,6 +1,6 @@
 import numpy as np
 
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.tasks import TaskTypesEnum
 
@@ -11,10 +11,10 @@ def test_multitask_pipeline_predict_correctly():
     """ Test pipeline fit predict correctness for classification and regression task in one pipeline """
     train_multimodal, test_multimodal = prepare_multitask_data()
 
-    logit_node = PrimaryNode('logit')
-    data_source_node = PrimaryNode('data_source_table/regression')
-    final_node = SecondaryNode('rfr', nodes_from=[logit_node, data_source_node])
-    final_node.custom_params = {'n_estimators': 5}
+    logit_node = PipelineNode('logit')
+    data_source_node = PipelineNode('data_source_table/regression')
+    final_node = PipelineNode('rfr', nodes_from=[logit_node, data_source_node])
+    final_node.parameters = {'n_estimators': 5}
     multitask_pipeline = Pipeline(final_node)
 
     multitask_pipeline.fit(train_multimodal)
@@ -27,4 +27,4 @@ def test_multitask_pipeline_predict_correctly():
 
     assert np.array_equal(side_predict, np.array(['a_category', 'a_category', 'b_category', 'b_category']))
     # Two source features and predicted class label as third
-    assert multitask_pipeline.root_node.fitted_operation.n_features_ == 3
+    assert multitask_pipeline.root_node.fitted_operation.n_features_in_ == 3

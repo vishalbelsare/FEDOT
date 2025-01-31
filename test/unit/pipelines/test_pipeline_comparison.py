@@ -3,8 +3,7 @@ from copy import deepcopy
 
 import pytest
 
-from fedot.core.optimisers.gp_comp.gp_operators import equivalent_subtree
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 
 
@@ -17,11 +16,11 @@ def pipeline_first():
     pipeline = Pipeline()
 
     root_of_tree, root_child_first, root_child_second = \
-        [SecondaryNode(model) for model in ('rf', 'rf', 'knn')]
+        [PipelineNode(model) for model in ('rf', 'rf', 'knn')]
 
     for root_node_child in (root_child_first, root_child_second):
         for requirement_model in ('logit', 'lda'):
-            new_node = PrimaryNode(requirement_model)
+            new_node = PipelineNode(requirement_model)
             root_node_child.nodes_from.append(new_node)
             pipeline.add_node(new_node)
         pipeline.add_node(root_node_child)
@@ -39,9 +38,9 @@ def pipeline_second():
     # LR RF   LR   LDA
     #    |  \
     #   KNN  LDA
-    new_node = SecondaryNode('rf')
+    new_node = PipelineNode('rf')
     for model_type in ('knn', 'lda'):
-        new_node.nodes_from.append(PrimaryNode(model_type))
+        new_node.nodes_from.append(PipelineNode(model_type))
     pipeline = pipeline_first()
     pipeline.update_subtree(pipeline.root_node.nodes_from[0].nodes_from[1], new_node)
 
@@ -52,9 +51,9 @@ def pipeline_third():
     #      RF
     #   /  |  \
     #  KNN LDA KNN
-    root_of_tree = SecondaryNode('rf')
+    root_of_tree = PipelineNode('rf')
     for model_type in ('knn', 'lda', 'knn'):
-        root_of_tree.nodes_from.append(PrimaryNode(model_type))
+        root_of_tree.nodes_from.append(PipelineNode(model_type))
     pipeline = Pipeline()
 
     for node in root_of_tree.nodes_from:
@@ -72,8 +71,8 @@ def pipeline_fourth():
     #    KNN   KNN
 
     pipeline = pipeline_third()
-    new_node = SecondaryNode('rf')
-    [new_node.nodes_from.append(PrimaryNode('knn')) for _ in range(2)]
+    new_node = PipelineNode('rf')
+    [new_node.nodes_from.append(PipelineNode('knn')) for _ in range(2)]
     pipeline.update_subtree(pipeline.root_node.nodes_from[1], new_node)
 
     return pipeline
@@ -115,21 +114,3 @@ def test_non_equality_cases(pipeline_fixture, request):
     for pair in list_pipelines_pairs:
         assert not pair[0] == pair[1]
         assert not pair[1] == pair[0]
-
-
-def test_pipelines_equivalent_subtree():
-    c_first = pipeline_first()
-    c_second = pipeline_second()
-    c_third = pipeline_third()
-
-    similar_nodes_first_and_second = equivalent_subtree(c_first, c_second)
-    assert len(similar_nodes_first_and_second) == 6
-
-    similar_nodes_first_and_third = equivalent_subtree(c_first, c_third)
-    assert not similar_nodes_first_and_third
-
-    similar_nodes_second_and_third = equivalent_subtree(c_second, c_third)
-    assert not similar_nodes_second_and_third
-
-    similar_nodes_third = equivalent_subtree(c_third, c_third)
-    assert len(similar_nodes_third) == 4

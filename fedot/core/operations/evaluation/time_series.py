@@ -7,14 +7,18 @@ from fedot.core.operations.evaluation.operation_implementations.data_operations.
     ExogDataTransformationImplementation, GaussianFilterImplementation, LaggedTransformationImplementation, \
     TsSmoothingImplementation, SparseLaggedTransformationImplementation, CutImplementation, \
     NumericalDerivativeFilterImplementation
-from fedot.core.operations.evaluation.operation_implementations.models. \
-    ts_implementations.statsmodels import AutoRegImplementation, GLMImplementation, ExpSmoothingImplementation
 from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.arima import \
     ARIMAImplementation, STLForecastARIMAImplementation
-from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.clstm import \
-    CLSTMImplementation
+from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.cgru import \
+    CGRUImplementation
+from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.naive import \
+    RepeatLastValueImplementation, NaiveAverageForecastImplementation
 from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.poly import \
     PolyfitImplementation
+from fedot.core.operations.evaluation.operation_implementations.models. \
+    ts_implementations.statsmodels import AutoRegImplementation, GLMImplementation, ExpSmoothingImplementation
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.utilities.random import ImplementationRandomStateHandler
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -24,25 +28,27 @@ class FedotTsForecastingStrategy(EvaluationStrategy):
     This class defines the certain classical models implementation for time
     series forecasting (e.g. AR, ARIMA)
 
-    :param str operation_type: str type of the operation defined in operation or
-    data operation repositories
-    :param dict params: hyperparameters to fit the model with
+    Args:
+        operation_type: str type of the operation defined in operation or
+            data operation repositories
+        params: hyperparameters to fit the model with
     """
 
-    __operations_by_types = {
+    _operations_by_types = {
         'arima': ARIMAImplementation,
         'ar': AutoRegImplementation,
         'stl_arima': STLForecastARIMAImplementation,
         'ets': ExpSmoothingImplementation,
-        'clstm': CLSTMImplementation,
+        'cgru': CGRUImplementation,
         'polyfit': PolyfitImplementation,
-        'glm': GLMImplementation
+        'glm': GLMImplementation,
+        'locf': RepeatLastValueImplementation,
+        'ts_naive_average': NaiveAverageForecastImplementation
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         super().__init__(operation_type, params)
         self.operation = self._convert_to_operation(operation_type)
-        self.params_for_fit = params
 
     def fit(self, train_data: InputData):
         """
@@ -51,37 +57,37 @@ class FedotTsForecastingStrategy(EvaluationStrategy):
         :return: trained model
         """
         warnings.filterwarnings("ignore", category=RuntimeWarning)
-        if self.params_for_fit:
-            model = self.operation(**self.params_for_fit)
-        else:
-            model = self.operation()
+        model = self.operation(self.params_for_fit)
 
-        model.fit(train_data)
+        with ImplementationRandomStateHandler(implementation=model):
+            model.fit(train_data)
         return model
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool) -> OutputData:
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         """
-        This method used for prediction of the target data.
+        This method used for prediction of the target data during predict stage.
 
         :param trained_operation: trained operation object
         :param predict_data: data to predict
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         :return OutputData: passed data with new predicted target
         """
 
-        prediction = trained_operation.predict(predict_data,
-                                               is_fit_pipeline_stage)
-        # Convert prediction to output (if it is required)
+        prediction = trained_operation.predict(predict_data)
         converted = self._convert_to_output(prediction, predict_data)
         return converted
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain custom time series forecasting '
-                             f'strategy for {operation_type}')
+    def predict_for_fit(self, trained_operation, predict_data: InputData) -> OutputData:
+        """
+        This method used for prediction of the target data during fit stage.
+
+        :param trained_operation: trained operation object
+        :param predict_data: data to predict
+        :return OutputData: passed data with new predicted target
+        """
+
+        prediction = trained_operation.predict_for_fit(predict_data)
+        converted = self._convert_to_output(prediction, predict_data)
+        return converted
 
 
 class FedotTsTransformingStrategy(EvaluationStrategy):
@@ -89,12 +95,13 @@ class FedotTsTransformingStrategy(EvaluationStrategy):
     This class defines the certain data operation implementation for time series
     forecasting
 
-    :param str operation_type: str type of the operation defined in operation or
-    data operation repositories
-    :param dict params: hyperparameters to fit the model with
+    Args:
+        operation_type: str type of the operation defined in operation or
+            data operation repositories
+        params: hyperparameters to fit the model with
     """
 
-    __operations_by_types = {
+    _operations_by_types = {
         'lagged': LaggedTransformationImplementation,
         'sparse_lagged': SparseLaggedTransformationImplementation,
         'smoothing': TsSmoothingImplementation,
@@ -103,10 +110,9 @@ class FedotTsTransformingStrategy(EvaluationStrategy):
         'diff_filter': NumericalDerivativeFilterImplementation,
         'cut': CutImplementation}
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         super().__init__(operation_type, params)
         self.operation = self._convert_to_operation(self.operation_type)
-        self.params_for_fit = params
 
     def fit(self, train_data: InputData):
         """
@@ -115,34 +121,34 @@ class FedotTsTransformingStrategy(EvaluationStrategy):
         :return: trained operation (if it is needed for applying)
         """
         warnings.filterwarnings("ignore", category=RuntimeWarning)
-        if self.params_for_fit:
-            transformation_operation = self.operation(**self.params_for_fit)
-        else:
-            transformation_operation = self.operation()
 
-        transformation_operation.fit(train_data)
+        transformation_operation = self.operation(self.params_for_fit)
+        with ImplementationRandomStateHandler(implementation=transformation_operation):
+            transformation_operation.fit(train_data)
         return transformation_operation
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool) -> OutputData:
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         """
-        This method used for prediction of the target data.
+        This method used for prediction of the target data during predict stage.
 
         :param trained_operation: trained operation object
         :param predict_data: data to predict
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         :return OutputData: passed data with new predicted target
         """
 
-        prediction = trained_operation.transform(predict_data,
-                                                 is_fit_pipeline_stage)
-        # Convert prediction to output (if it is required)
+        prediction = trained_operation.transform(predict_data)
         converted = self._convert_to_output(prediction, predict_data)
         return converted
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain custom time series transforming '
-                             f'strategy for {operation_type}')
+    def predict_for_fit(self, trained_operation, predict_data: InputData) -> OutputData:
+        """
+        This method used for prediction of the target data during fit stage.
+
+        :param trained_operation: trained operation object
+        :param predict_data: data to predict
+        :return OutputData: passed data with new predicted target
+        """
+
+        prediction = trained_operation.transform_for_fit(predict_data)
+        converted = self._convert_to_output(prediction, predict_data)
+        return converted

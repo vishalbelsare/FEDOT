@@ -7,32 +7,32 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.pipelines.ts_wrappers import in_sample_ts_forecast
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TaskTypesEnum, Task, TsForecastingParams
+from fedot.core.utils import set_random_seed
 
 warnings.filterwarnings('ignore')
-np.random.seed(2020)
 
 
 def get_refinement_pipeline_with_polyfit():
     """ Create 4-level pipeline with decompose operation """
 
-    node_polyfit = PrimaryNode('polyfit')
-    node_polyfit.custom_params = {'degree': 2}
-    node_lagged = PrimaryNode('lagged')
-    node_decompose = SecondaryNode('decompose', nodes_from=[node_lagged, node_polyfit])
-    node_dtreg = SecondaryNode('dtreg', nodes_from=[node_decompose])
-    node_dtreg.custom_params = {'max_depth': 3}
+    node_polyfit = PipelineNode('polyfit')
+    node_polyfit.parameters = {'degree': 2}
+    node_lagged = PipelineNode('lagged')
+    node_decompose = PipelineNode('decompose', nodes_from=[node_lagged, node_polyfit])
+    node_dtreg = PipelineNode('dtreg', nodes_from=[node_decompose])
+    node_dtreg.parameters = {'max_depth': 3}
 
     # Pipelines with different outputs
     pipeline_with_decompose_finish = Pipeline(node_dtreg)
     pipeline_with_main_finish = Pipeline(node_polyfit)
 
     # Combining branches with different targets (T and T_decomposed)
-    final_node = SecondaryNode('ridge', nodes_from=[node_polyfit, node_dtreg])
+    final_node = PipelineNode('ridge', nodes_from=[node_polyfit, node_dtreg])
 
     pipeline = Pipeline(final_node)
     return pipeline_with_main_finish, pipeline_with_decompose_finish, pipeline
@@ -41,19 +41,19 @@ def get_refinement_pipeline_with_polyfit():
 def get_refinement_pipeline(lagged):
     """ Create 4-level pipeline with decompose operation """
 
-    node_lagged = PrimaryNode('lagged')
-    node_lagged.custom_params = {'window_size': lagged}
-    node_lasso = SecondaryNode('lasso', nodes_from=[node_lagged])
-    node_decompose = SecondaryNode('decompose', nodes_from=[node_lagged, node_lasso])
-    node_dtreg = SecondaryNode('dtreg', nodes_from=[node_decompose])
-    node_dtreg.custom_params = {'max_depth': 3}
+    node_lagged = PipelineNode('lagged')
+    node_lagged.parameters = {'window_size': lagged}
+    node_lasso = PipelineNode('lasso', nodes_from=[node_lagged])
+    node_decompose = PipelineNode('decompose', nodes_from=[node_lagged, node_lasso])
+    node_dtreg = PipelineNode('dtreg', nodes_from=[node_decompose])
+    node_dtreg.parameters = {'max_depth': 3}
 
     # Pipelines with different outputs
     pipeline_with_decompose_finish = Pipeline(node_dtreg)
     pipeline_with_main_finish = Pipeline(node_lasso)
 
     # Combining branches with different targets (T and T_decomposed)
-    final_node = SecondaryNode('ridge', nodes_from=[node_lasso, node_dtreg])
+    final_node = PipelineNode('ridge', nodes_from=[node_lasso, node_dtreg])
 
     pipeline = Pipeline(final_node)
     return pipeline_with_main_finish, pipeline_with_decompose_finish, pipeline
@@ -62,12 +62,12 @@ def get_refinement_pipeline(lagged):
 def get_non_refinement_pipeline(lagged):
     """ Create 4-level pipeline without decompose operation """
 
-    node_lagged = PrimaryNode('lagged')
-    node_lagged.custom_params = {'window_size': lagged}
-    node_lasso = SecondaryNode('lasso', nodes_from=[node_lagged])
-    node_dtreg = SecondaryNode('dtreg', nodes_from=[node_lagged])
-    node_dtreg.custom_params = {'max_depth': 3}
-    final_node = SecondaryNode('ridge', nodes_from=[node_lasso, node_dtreg])
+    node_lagged = PipelineNode('lagged')
+    node_lagged.parameters = {'window_size': lagged}
+    node_lasso = PipelineNode('lasso', nodes_from=[node_lagged])
+    node_dtreg = PipelineNode('dtreg', nodes_from=[node_lagged])
+    node_dtreg.parameters = {'max_depth': 3}
+    final_node = PipelineNode('ridge', nodes_from=[node_lasso, node_dtreg])
 
     pipeline = Pipeline(final_node)
     return pipeline
@@ -160,6 +160,8 @@ def run_refinement_forecast(path_to_file, len_forecast=100, lagged=150,
 
 
 if __name__ == '__main__':
-    path = '../../../cases/data/time_series/economic_data.csv'
+    set_random_seed(2020)
+
+    path = '../../real_examples/real_cases/data/time_series/economic_data.csv'
     run_refinement_forecast(path, len_forecast=50, validation_blocks=5,
                             lagged=50, vis_with_decompose=True)

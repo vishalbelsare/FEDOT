@@ -2,207 +2,209 @@ from copy import deepcopy
 from typing import Optional, Union
 
 import numpy as np
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 from fedot.core.data.data import InputData, OutputData
-from fedot.core.data.data_preprocessing import find_categorical_columns
-from fedot.core.operations.evaluation.operation_implementations.implementation_interfaces import \
+from fedot.core.operations.evaluation.operation_implementations.implementation_interfaces import (
     DataOperationImplementation
+)
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.preprocessing.data_types import TYPE_TO_ID
+from fedot.utilities.memory import reduce_mem_usage
 
 
 class OneHotEncodingImplementation(DataOperationImplementation):
     """ Class for automatic categorical data detection and one hot encoding """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters] = None):
+        super().__init__(params)
         default_params = {
             'handle_unknown': 'ignore'
         }
-        if not params:
-            # Default parameters
-            self.encoder = OneHotEncoder(**default_params)
-        else:
-            self.encoder = OneHotEncoder(**{**params, **default_params})
-        self.categorical_ids = None
-        self.non_categorical_ids = None
+        self.encoder = OneHotEncoder(**{**default_params, **self.params.to_dict()})
+        self.categorical_ids: np.ndarray = np.array([])
+        self.non_categorical_ids: np.ndarray = np.array([])
+        self.encoded_ids: np.ndarray = np.array([])
+        self.new_numerical_idx: np.ndarray = np.array([])
 
     def fit(self, input_data: InputData):
         """ Method for fit encoder with automatic determination of categorical features
 
-        :param input_data: data with features, target and ids for encoder training
-        :return encoder: trained encoder (optional output)
+        :param input_data: data with features, target and ids for encoder fitting
+        :return encoder: encoder (optional output)
         """
         features = input_data.features
-        features_types = input_data.supplementary_data.column_types.get('features')
-        categorical_ids, non_categorical_ids = find_categorical_columns(features,
-                                                                        features_types)
-
-        # Indices of columns with categorical and non-categorical features
-        self.categorical_ids = categorical_ids
-        self.non_categorical_ids = non_categorical_ids
+        self.categorical_ids, self.non_categorical_ids = input_data.categorical_idx, input_data.numerical_idx
 
         # If there are categorical features - process it
-        if self.categorical_ids:
-            updated_cat_features = np.array(features[:, self.categorical_ids], dtype=str)
+        if self.categorical_ids.size > 0:
+            if isinstance(features, np.ndarray):
+                updated_cat_features = features[:, self.categorical_ids].astype(str)
+            else:
+                updated_cat_features = features.iloc[:, self.categorical_ids].astype(str)
+
             self.encoder.fit(updated_cat_features)
 
         return self.encoder
 
-    def transform(self, input_data, is_fit_pipeline_stage: Optional[bool]):
+    def transform(self, input_data: InputData) -> OutputData:
         """
         The method that transforms the categorical features in the original
-        dataset, but does not affect the rest features
+        dataset, but does not affect the rest features. Applicable during predict stage
 
         :param input_data: data with features, target and ids for transformation
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         :return output_data: output data with transformed features table
         """
         copied_data = deepcopy(input_data)
 
-        features = copied_data.features
-        if not self.categorical_ids:
-            # If there are no categorical features in the table
-            transformed_features = features
-        else:
-            # If categorical features are exists
-            transformed_features = self._apply_one_hot_encoding(features)
+        transformed_features = copied_data.features
+        if self.categorical_ids.size > 0:
+            # If categorical features exist
+            transformed_features = self._apply_one_hot_encoding(transformed_features)
 
         # Update features
-        output_data = self._convert_to_output(copied_data,
-                                              transformed_features)
+        output_data = self._convert_to_output(copied_data, transformed_features)
         self._update_column_types(output_data)
+
+        if isinstance(output_data.features, pd.DataFrame):
+            output_data.predict = reduce_mem_usage(
+                transformed_features,
+                output_data.supplementary_data.col_type_ids['features']
+            )
+
         return output_data
 
     def _update_column_types(self, output_data: OutputData):
         """ Update column types after encoding. Categorical columns becomes integer with extension """
-        if self.categorical_ids:
+        if self.categorical_ids.size > 0:
             # There are categorical features in the table
-            col_types = output_data.supplementary_data.column_types['features']
-            numerical_columns = [t_name for t_name in col_types if 'str' not in t_name]
+            feature_type_ids = output_data.supplementary_data.col_type_ids['features']
+            numerical_columns = feature_type_ids[feature_type_ids != TYPE_TO_ID[str]]
 
             # Calculate new binary columns number after encoding
             encoded_columns_number = output_data.predict.shape[1] - len(numerical_columns)
-            numerical_columns.extend([str(int)] * encoded_columns_number)
+            numerical_columns = np.append(numerical_columns, [TYPE_TO_ID[int]] * encoded_columns_number)
 
-            output_data.supplementary_data.column_types['features'] = numerical_columns
+            output_data.encoded_idx = self.encoded_ids
+            output_data.supplementary_data.col_type_ids['features'] = numerical_columns
 
-    def _apply_one_hot_encoding(self, features: np.array):
+    def _apply_one_hot_encoding(self, features: Union[np.ndarray, pd.DataFrame]) -> np.ndarray:
         """
         The method creates a table based on categorical and real features after One Hot Encoding transformation
 
         :param features: tabular data for processing
         :return transformed_features: transformed features table
         """
+        if isinstance(features, np.ndarray):
+            transformed_categorical = self.encoder.transform(features[:, self.categorical_ids]).toarray()
+            # Stack transformed categorical and non-categorical data, ignore if none
+            non_categorical_features = features[:, self.non_categorical_ids.astype(int)]
 
-        categorical_features = np.array(features[:, self.categorical_ids])
-        transformed_categorical = self.encoder.transform(categorical_features).toarray()
-
-        # If there are non-categorical features in the data
-        if not self.non_categorical_ids:
-            transformed_features = transformed_categorical
         else:
-            # Stack transformed categorical and non-categorical data
-            non_categorical_features = np.array(features[:, self.non_categorical_ids])
-            frames = (non_categorical_features, transformed_categorical)
-            transformed_features = np.hstack(frames)
+            transformed_categorical = self.encoder.transform(features.iloc[:, self.categorical_ids]).toarray()
+            non_categorical_features = features.iloc[:, self.non_categorical_ids.astype(int)].to_numpy()
+
+        frames = (non_categorical_features, transformed_categorical)
+        transformed_features = np.hstack(frames)
+        self.encoded_ids = np.array(range(non_categorical_features.shape[1], transformed_features.shape[1]))
 
         return transformed_features
-
-    def get_params(self):
-        return self.encoder.get_params()
 
 
 class LabelEncodingImplementation(DataOperationImplementation):
     """ Class for categorical features encoding based on LabelEncoding """
 
-    def __init__(self, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters] = None):
+        super().__init__(params)
         # LabelEncoder has no parameters
         self.encoders = {}
-        self.categorical_ids = None
-        self.non_categorical_ids = None
+        self.categorical_ids: np.ndarray = np.array([])
+        self.non_categorical_ids: np.ndarray = np.array([])
 
     def fit(self, input_data: InputData):
-        features_types = input_data.supplementary_data.column_types.get('features')
-        self.categorical_ids, self.non_categorical_ids = find_categorical_columns(input_data.features,
-                                                                                  features_types)
+        self.categorical_ids, self.non_categorical_ids = input_data.categorical_idx, input_data.numerical_idx
 
-        # If there are categorical features - process it
-        if self.categorical_ids:
-            # For every categorical feature - perform encoding
-            self._fit_label_encoders(input_data)
+        # For every existing categorical feature - perform encoding
+        self._fit_label_encoders(input_data.features)
         return self.encoders
 
-    def transform(self, input_data, is_fit_pipeline_stage: Optional[bool]):
-        """ Apply LabelEncoder on categorical features and doesn't process float or int ones """
+    def transform(self, input_data: InputData) -> OutputData:
+        """ Apply LabelEncoder on categorical features and doesn't process float or int ones
+        Applicable during predict stage
+        """
         copied_data = deepcopy(input_data)
-        if self.categorical_ids:
-            # If categorical features are exists - transform them inplace in InputData
-            for categorical_id in self.categorical_ids:
-                categorical_column = input_data.features[:, categorical_id]
+        # If categorical features exist - transform them inplace in InputData
+        self._apply_label_encoder(copied_data.features)
 
-                # Converting into string - so nans becomes marked as 'nan'
-                categorical_column = categorical_column.astype(str)
-                gap_ids = np.ravel(np.argwhere(categorical_column == 'nan'))
-
-                transformed = self._apply_label_encoder(categorical_column, categorical_id, gap_ids)
-                copied_data.features[:, categorical_id] = transformed
-
-        # Update features
         output_data = self._convert_to_output(copied_data,
                                               copied_data.features)
-        # Store source features values
-        output_data.features = input_data.features
 
         self._update_column_types(output_data)
         return output_data
 
     def _update_column_types(self, output_data: OutputData):
         """ Update column types after encoding. Categorical becomes integer """
-        if self.categorical_ids:
-            # Categorical features were in the dataset
-            col_types = output_data.supplementary_data.column_types['features']
-            for categorical_id in self.categorical_ids:
-                col_types[categorical_id] = str(int)
+        feature_type_ids = output_data.supplementary_data.col_type_ids['features']
+        feature_type_ids[self.categorical_ids] = TYPE_TO_ID[int]
 
-            output_data.supplementary_data.column_types['features'] = col_types
-
-    def _fit_label_encoders(self, input_data: InputData):
+    def _fit_label_encoders(self, data: Union[np.ndarray, pd.DataFrame]):
         """ Fit LabelEncoder for every categorical column in the dataset """
-        for categorical_id in self.categorical_ids:
-            categorical_column = input_data.features[:, categorical_id]
-            le = LabelEncoder()
-            le.fit(categorical_column)
+        if isinstance(data, np.ndarray):
+            categorical_columns = data[:, self.categorical_ids].astype(str)
 
-            self.encoders.update({categorical_id: le})
+            for column_id, column in zip(self.categorical_ids, categorical_columns.T):
+                le = LabelEncoder()
+                le.fit(column)
+                self.encoders[column_id] = le
 
-    def _apply_label_encoder(self, categorical_column: np.array, categorical_id: int,
-                             gap_ids: Union[np.array, None]):
-        """ Apply fitted LabelEncoder for column transformation
+        else:
+            categorical_columns = data.iloc[:, self.categorical_ids].astype(str)
 
-        :param categorical_column: numpy array with categorical features
-        :param categorical_id: index of current categorical column
-        :param gap_ids: indices of gap elements in array
+            for column_id in self.categorical_ids:
+                le = LabelEncoder()
+                le.fit(categorical_columns.iloc[:, column_id])
+                self.encoders[column_id] = le
+
+    def _apply_label_encoder(self, data: Union[np.ndarray, pd.DataFrame]):
         """
-        column_encoder = self.encoders[categorical_id]
-        encoder_classes = list(column_encoder.classes_)
+        Applies fitted LabelEncoder for all categorical features inplace
 
-        # If the column contains categories not previously encountered
-        for label in list(set(categorical_column)):
-            if label not in encoder_classes:
-                encoder_classes.append(label)
+        Args:
+            data: numpy array with all features
+        """
+        if isinstance(data, np.ndarray):
+            categorical_columns = data[:, self.categorical_ids].astype(str)
 
-        # Extent encoder classes
-        column_encoder.classes_ = encoder_classes
+            for column_id, column in zip(self.categorical_ids, categorical_columns.T):
+                column_encoder = self.encoders[column_id]
+                column_encoder.classes_ = np.unique(np.concatenate((column_encoder.classes_, column)))
 
-        transformed_column = column_encoder.transform(categorical_column)
-        if len(gap_ids) > 0:
-            # Store np.nan values
-            transformed_column = transformed_column.astype(object)
-            transformed_column[gap_ids] = np.nan
+                transformed_column = column_encoder.transform(column)
+                nan_indices = np.flatnonzero(column == 'nan')
+                if len(nan_indices):
+                    # Store np.nan values
+                    transformed_column = transformed_column.astype(object)
+                    transformed_column[nan_indices] = np.nan
 
-        return transformed_column
+                data[:, column_id] = transformed_column
+        else:
+            categorical_columns = data.iloc[:, self.categorical_ids].astype(str)
 
-    def get_params(self):
+            for column_id in self.categorical_ids:
+                column_encoder = self.encoders[column_id]
+                column = categorical_columns[column_id]
+                column_encoder.classes_ = np.unique(np.concatenate((column_encoder.classes_, column)))
+
+                transformed_column = column_encoder.transform(column)
+                nan_indices = np.flatnonzero(column == 'nan')
+                if len(nan_indices):
+                    # Store np.nan values
+                    transformed_column = transformed_column.astype(object)
+                    transformed_column[nan_indices] = np.nan
+
+                data.iloc[:, column_id] = transformed_column
+
+    def get_params(self) -> OperationParameters:
         """ Due to LabelEncoder has no parameters - return empty set """
-        return {}
+        return OperationParameters()

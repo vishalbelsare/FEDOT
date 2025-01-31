@@ -1,13 +1,14 @@
+import logging
 import operator
 import timeit
 from functools import reduce
 from typing import Optional
 
 import pandas as pd
+from golem.core.optimisers.opt_history_objects.opt_history import OptHistory
 from matplotlib import cm, colors, pyplot as plt
 
-from fedot.api.main import Fedot
-from fedot.core.optimisers.opt_history import OptHistory
+from fedot import Fedot
 from fedot.core.utils import fedot_project_root
 
 
@@ -27,7 +28,7 @@ def run_experiments(timeout: float = None, partitions_n=10, n_jobs=-1):
     :param n_jobs: how many processors you want to use in a multiprocessing mode
 
     """
-    train_data_path = f'{fedot_project_root()}/cases/data/scoring/scoring_train.csv'
+    train_data_path = f'{fedot_project_root()}/examples/real_cases/data/scoring/scoring_train.csv'
 
     problem = 'classification'
 
@@ -44,9 +45,9 @@ def run_experiments(timeout: float = None, partitions_n=10, n_jobs=-1):
         for partition in partitions:
             train_data_tmp = train_data.iloc[:partition].copy()
             start_time = timeit.default_timer()
-            auto_model = Fedot(problem=problem, seed=42, timeout=timeout, n_jobs=_n_jobs,
-                               composer_params={'with_tuning': False}, preset='fast_train',
-                               verbose_level=-1)
+            auto_model = Fedot(problem=problem, seed=42, timeout=timeout,
+                               n_jobs=_n_jobs, logging_level=logging.FATAL,
+                               with_tuning=False, preset='fast_train')
             auto_model.fit(features=train_data_tmp, target='target')
             times[_n_jobs].append((timeit.default_timer() - start_time) / 60)
             c_pipelines = _count_pipelines(auto_model.history)

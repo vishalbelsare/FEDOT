@@ -1,21 +1,22 @@
 from os import makedirs
 from os.path import exists, join
 
+from golem.core.optimisers.genetic.gp_params import GPAlgorithmParameters
+from golem.core.optimisers.genetic.operators.inheritance import GeneticSchemeTypesEnum
+from fedot.core.pipelines.pipeline_composer_requirements import PipelineComposerRequirements
+
 from examples.simple.classification.classification_pipelines import classification_three_depth_manual_pipeline
 from examples.simple.regression.regression_pipelines import regression_three_depth_manual_pipeline
 from fedot.core.composer.composer_builder import ComposerBuilder
-from fedot.core.composer.gp_composer.gp_composer import PipelineComposerRequirements
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.optimisers.gp_comp.gp_optimiser import GPGraphOptimiserParameters
-from fedot.core.optimisers.gp_comp.operators.inheritance import GeneticSchemeTypesEnum
 from fedot.core.repository.operation_types_repository import get_operations_for_task
-from fedot.core.repository.quality_metrics_repository import ClassificationMetricsEnum, MetricsRepository, \
+from fedot.core.repository.metrics_repository import ClassificationMetricsEnum, MetricsRepository, \
     RegressionMetricsEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
 from fedot.core.utils import default_fedot_data_dir, fedot_project_root
-from fedot.sensitivity.node_sa_approaches import NodeDeletionAnalyze, NodeReplaceOperationAnalyze
-from fedot.sensitivity.nodes_sensitivity import NodesAnalysis
+from fedot.structural_analysis.node_sa_approaches import NodeDeletionAnalyze, NodeReplaceOperationAnalyze
+from fedot.structural_analysis.nodes_sensitivity import NodesAnalysis
 
 
 def get_composed_pipeline(dataset_to_compose, task, metric_function):
@@ -25,20 +26,23 @@ def get_composed_pipeline(dataset_to_compose, task, metric_function):
     # the choice and initialisation of the GP search
     composer_requirements = PipelineComposerRequirements(
         primary=available_model_types,
-        secondary=available_model_types, max_arity=3,
-        max_depth=3, pop_size=20, num_of_generations=20,
-        crossover_prob=0.8, mutation_prob=0.8)
+        secondary=available_model_types,
+        max_arity=3, max_depth=3,
+        num_of_generations=20,
+    )
 
-    # GP optimiser parameters choice
-    scheme_type = GeneticSchemeTypesEnum.steady_state
-    optimiser_parameters = GPGraphOptimiserParameters(genetic_scheme_type=scheme_type)
+    optimizer_parameters = GPAlgorithmParameters(
+        pop_size=15,
+        mutation_prob=0.8, crossover_prob=0.8,
+        genetic_scheme_type=GeneticSchemeTypesEnum.steady_state,
+    )
 
-    # Create builder for composer and set composer params
-    builder = ComposerBuilder(task=task).with_requirements(composer_requirements).with_metrics(
-        metric_function).with_optimiser(parameters=optimiser_parameters)
-
-    # Create GP-based composer
-    composer = builder.build()
+    # Create composer and with required composer params
+    composer = ComposerBuilder(task=task). \
+        with_requirements(composer_requirements). \
+        with_optimizer_params(optimizer_parameters). \
+        with_metrics(metric_function). \
+        build()
 
     # the optimal pipeline generation by composition - the most time-consuming task
     pipeline_evo_composed = composer.compose_pipeline(data=dataset_to_compose)
@@ -101,11 +105,11 @@ def run_analysis_case(train_data: InputData, test_data: InputData,
     pipeline.fit(train_data)
 
     if not result_path:
-        result_path = join(default_fedot_data_dir(), 'sensitivity', f'{case_name}')
+        result_path = join(default_fedot_data_dir(), 'structural_analysis', f'{case_name}')
         if not exists(result_path):
             makedirs(result_path)
 
-    pipeline.show(path=result_path)
+    pipeline.show(save_path=result_path)
 
     pipeline_analysis_result = NodesAnalysis(pipeline=pipeline, train_data=train_data,
                                              test_data=test_data, path_to_save=result_path,
@@ -119,7 +123,7 @@ def run_class_scoring_case(is_composed: bool, path_to_save=None):
     train_data, test_data = get_scoring_data()
     task = Task(TaskTypesEnum.classification)
     # the choice of the metric for the pipeline quality assessment during composition
-    metric_function = MetricsRepository().metric_by_id(ClassificationMetricsEnum.ROCAUC_penalty)
+    metric_function = MetricsRepository.get_metric(ClassificationMetricsEnum.ROCAUC_penalty)
 
     if is_composed:
         case = 'scoring_composed'
@@ -137,7 +141,7 @@ def run_class_kc2_case(is_composed: bool = False, path_to_save=None):
     train_data, test_data = get_kc2_data()
     task = Task(TaskTypesEnum.classification)
     # the choice of the metric for the pipeline quality assessment during composition
-    metric_function = MetricsRepository().metric_by_id(ClassificationMetricsEnum.ROCAUC_penalty)
+    metric_function = MetricsRepository.get_metric(ClassificationMetricsEnum.ROCAUC_penalty)
 
     if is_composed:
         case = 'kc2_composed'
@@ -155,7 +159,7 @@ def run_regr_case(is_composed: bool = False, path_to_save=None):
     train_data, test_data = get_cholesterol_data()
     task = Task(TaskTypesEnum.regression)
     # the choice of the metric for the pipeline quality assessment during composition
-    metric_function = MetricsRepository().metric_by_id(RegressionMetricsEnum.RMSE)
+    metric_function = MetricsRepository.get_metric(RegressionMetricsEnum.RMSE)
 
     if is_composed:
         case = 'cholesterol_composed'

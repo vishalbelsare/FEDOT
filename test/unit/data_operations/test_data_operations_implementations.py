@@ -1,26 +1,28 @@
 import os
 
 import numpy as np
+import pytest
+
 from examples.simple.classification.classification_with_tuning import get_classification_dataset
 from examples.simple.regression.regression_with_tuning import get_regression_dataset
 from examples.simple.time_series_forecasting.gapfilling import generate_synthetic_data
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
 from fedot.core.data.supplementary_data import SupplementaryData
+from fedot.core.operations.evaluation.operation_implementations.data_operations.sklearn_imbalanced_class import \
+    ResampleImplementation
 from fedot.core.operations.evaluation.operation_implementations.data_operations. \
     sklearn_transformations import ImputationImplementation
 from fedot.core.operations.evaluation.operation_implementations.data_operations.ts_transformations import \
     CutImplementation, LaggedTransformationImplementation
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.operation_types_repository import OperationTypesRepository
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
-from fedot.preprocessing.data_types import NAME_CLASS_FLOAT, NAME_CLASS_INT, \
-    NAME_CLASS_STR
-from test.unit.preprocessing.test_preprocessing_though_api import data_with_only_categorical_features
-
-np.random.seed(2021)
+from fedot.preprocessing.data_types import TYPE_TO_ID
+from test.unit.preprocessing.test_preprocessing_through_api import data_with_only_categorical_features
 
 
 def get_small_regression_dataset():
@@ -127,23 +129,29 @@ def get_multivariate_time_series(mutli_ts=False):
 
 
 def get_nan_inf_data():
-    supp_data = SupplementaryData(column_types={'features': [NAME_CLASS_FLOAT] * 4})
-    train_input = InputData(idx=[0, 1, 2, 3],
-                            features=np.array([[1, 2, 3, 4],
-                                               [2, np.nan, 4, 5],
-                                               [3, 4, 5, np.inf],
-                                               [-np.inf, 5, 6, 7]]),
-                            target=np.array([1, 2, 3, 4]),
-                            task=Task(TaskTypesEnum.regression),
-                            data_type=DataTypesEnum.table,
-                            supplementary_data=supp_data)
+    supp_data = SupplementaryData(col_type_ids={'features': np.array([TYPE_TO_ID[float]] * 4)})
+    train_input = InputData(
+        idx=np.array([0, 1, 2, 3]),
+        features=np.array([
+            [1, 2, 3, 4],
+            [2, np.nan, 4, 5],
+            [3, 4, 5, np.inf],
+            [-np.inf, 5, 6, 7]
+        ]),
+        target=np.array([1, 2, 3, 4]),
+        numerical_idx=np.array([0, 1, 2, 3]),
+        categorical_idx=np.array([]),
+        task=Task(TaskTypesEnum.regression),
+        data_type=DataTypesEnum.table,
+        supplementary_data=supp_data
+    )
 
     return train_input
 
 
 def get_single_feature_data(task=None):
-    supp_data = SupplementaryData(column_types={'features': [NAME_CLASS_INT],
-                                                'target': [NAME_CLASS_INT]})
+    supp_data = SupplementaryData(col_type_ids={'features': np.array([TYPE_TO_ID[int]]),
+                                                'target': np.array([TYPE_TO_ID[int]])})
     train_input = InputData(idx=[0, 1, 2, 3, 4, 5],
                             features=np.array([[1], [2], [3], [7], [8], [9]]),
                             target=np.array([[0], [0], [0], [1], [1], [1]]),
@@ -166,10 +174,11 @@ def get_mixed_data(task=None, extended=False):
                              [np.nan, np.nan, '1', np.nan, '2', 'not blue', 'di'],
                              [8, '1', '1', 0, '1', 'not blue', 'da bu'],
                              [9, '0', '0', 0, '0', 'not blue', 'dai']], dtype=object)
-        features_types = [NAME_CLASS_INT, NAME_CLASS_STR, NAME_CLASS_STR, NAME_CLASS_INT,
-                          NAME_CLASS_STR, NAME_CLASS_STR, NAME_CLASS_STR]
-        supp_data = SupplementaryData(column_types={'features': features_types,
-                                                    'target': [NAME_CLASS_INT]})
+        feature_type_ids = np.array([TYPE_TO_ID[int], TYPE_TO_ID[str], TYPE_TO_ID[str], TYPE_TO_ID[int],
+                                     TYPE_TO_ID[str], TYPE_TO_ID[str], TYPE_TO_ID[str]])
+        target_type_ids = np.array([TYPE_TO_ID[int]])
+        supp_data = SupplementaryData(col_type_ids={'features': feature_type_ids,
+                                                    'target': target_type_ids})
     else:
         features = np.array([[1, '0', 1],
                              [2, '1', 0],
@@ -177,9 +186,10 @@ def get_mixed_data(task=None, extended=False):
                              [7, '1', 1],
                              [8, '1', 1],
                              [9, '0', 0]], dtype=object)
-        features_types = [NAME_CLASS_INT, NAME_CLASS_STR, NAME_CLASS_INT]
-        supp_data = SupplementaryData(column_types={'features': features_types,
-                                                    'target': [NAME_CLASS_INT]})
+        feature_type_ids = np.array([TYPE_TO_ID[int], TYPE_TO_ID[str], TYPE_TO_ID[int]])
+        target_type_ids = np.array([TYPE_TO_ID[int]])
+        supp_data = SupplementaryData(col_type_ids={'features': feature_type_ids,
+                                                    'target': target_type_ids})
 
     train_input = InputData(idx=[0, 1, 2, 3, 4, 5],
                             features=features,
@@ -198,17 +208,50 @@ def get_nan_binary_data(task=None):
     Binary int columns must be processed as "almost categorical". Current dataset
     For example, nan object in [1, nan, 0, 0] must be filled as 0, not as 0.33
     """
-    features_types = [NAME_CLASS_INT, NAME_CLASS_STR, NAME_CLASS_INT]
-    supp_data = SupplementaryData(column_types={'features': features_types})
+    feature_type_ids = np.array([TYPE_TO_ID[int], TYPE_TO_ID[str], TYPE_TO_ID[int]])
+    supp_data = SupplementaryData(col_type_ids={'features': feature_type_ids})
     features = np.array([[1, '0', 0],
                          [np.nan, np.nan, np.nan],
                          [0, '2', 1],
                          [1, '1', 1],
                          [5, '1', 1]], dtype=object)
 
-    input_data = InputData(idx=[0, 1, 2, 3], features=features,
-                           target=np.array([[0], [0], [1], [1]]),
-                           task=task, data_type=DataTypesEnum.table,
+    input_data = InputData(
+        idx=np.array([0, 1, 2, 3]),
+        features=features,
+        target=np.array([[0], [0], [1], [1]]),
+        categorical_idx=np.array([1]),
+        task=task, data_type=DataTypesEnum.table,
+        supplementary_data=supp_data
+    )
+
+    return input_data
+
+
+def get_unbalanced_dataset(size=10, disbalance=0.4, target_dim=None):
+    """ Generate table with one numerical and one categorical features by selected size and class disbalance
+        Target is binary and unbalanced: majority "1" class is more than minority "0" class.
+        It can be generated with two options: 1D or 2D representation of target.
+    """
+    minor_size = round(size * disbalance)
+    major_size = size - minor_size
+
+    features = np.array([[np.random.rand(), 'minor']] * minor_size + [[np.random.rand(), 'major']] * major_size)
+    target = np.array([0] * minor_size + [1] * major_size)
+
+    if target_dim == 2:
+        target = target.reshape(-1, 1)
+
+    supp_data = SupplementaryData(col_type_ids={
+        'features': np.array([TYPE_TO_ID[int], TYPE_TO_ID[str]]),
+        'target': np.array([TYPE_TO_ID[int]])
+    })
+
+    input_data = InputData(idx=np.arange(features.shape[0]),
+                           features=features,
+                           target=target,
+                           task=Task(TaskTypesEnum.classification),
+                           data_type=DataTypesEnum.table,
                            supplementary_data=supp_data)
 
     return input_data
@@ -220,16 +263,26 @@ def data_with_binary_int_features_and_equal_categories():
     must be processed as "almost categorical". Current dataset
     For example, nan object in [1, nan, 0, 0] must be filled as 0, not as 0.33
     """
-    supp_data = SupplementaryData(column_types={'features': [NAME_CLASS_INT, NAME_CLASS_INT]})
+    supp_data = SupplementaryData(col_type_ids={'features': np.array([TYPE_TO_ID[int], TYPE_TO_ID[int]])})
     task = Task(TaskTypesEnum.classification)
     features = np.array([[1, 10],
                          [np.nan, np.nan],
                          [np.nan, np.nan],
                          [0, 0]])
     target = np.array([['not-nan'], ['nan'], ['nan'], ['not-nan']])
-    train_input = InputData(idx=[0, 1, 2, 3], features=features, target=target,
-                            task=task, data_type=DataTypesEnum.table,
-                            supplementary_data=supp_data)
+    train_input = InputData(
+        idx=np.array([0, 1, 2, 3]),
+        features=features,
+        target=target,
+        numerical_idx=np.array([0, 1]),
+        categorical_idx=np.array([]),
+        encoded_idx=np.array([]),
+        categorical_features=None,
+        features_names=None,
+        task=task,
+        data_type=DataTypesEnum.table,
+        supplementary_data=supp_data
+    )
 
     return train_input
 
@@ -237,12 +290,12 @@ def data_with_binary_int_features_and_equal_categories():
 def test_regression_data_operations():
     train_input, predict_input, y_test = get_small_regression_dataset()
 
-    operation_names, _ = OperationTypesRepository('data_operation').suitable_operation(
+    operation_names = OperationTypesRepository('data_operation').suitable_operation(
         task_type=TaskTypesEnum.regression)
 
     for data_operation in operation_names:
-        node_data_operation = PrimaryNode(data_operation)
-        node_final = SecondaryNode('linear', nodes_from=[node_data_operation])
+        node_data_operation = PipelineNode(data_operation)
+        node_final = PipelineNode('linear', nodes_from=[node_data_operation])
         pipeline = Pipeline(node_final)
 
         # Fit and predict for pipeline
@@ -256,12 +309,12 @@ def test_regression_data_operations():
 def test_classification_data_operations():
     train_input, predict_input, y_test = get_small_classification_dataset()
 
-    operation_names, _ = OperationTypesRepository('data_operation').suitable_operation(
+    operation_names = OperationTypesRepository('data_operation').suitable_operation(
         task_type=TaskTypesEnum.classification)
 
     for data_operation in operation_names:
-        node_data_operation = PrimaryNode(data_operation)
-        node_final = SecondaryNode('logit', nodes_from=[node_data_operation])
+        node_data_operation = PipelineNode(data_operation)
+        node_final = PipelineNode('logit', nodes_from=[node_data_operation])
         pipeline = Pipeline(node_final)
 
         # Fit and predict for pipeline
@@ -275,8 +328,8 @@ def test_classification_data_operations():
 def test_ts_forecasting_lagged_data_operation():
     train_input, predict_input, y_test = get_time_series()
 
-    node_lagged = PrimaryNode('lagged')
-    node_ridge = SecondaryNode('ridge', nodes_from=[node_lagged])
+    node_lagged = PipelineNode('lagged')
+    node_ridge = PipelineNode('ridge', nodes_from=[node_lagged])
     pipeline = Pipeline(node_ridge)
 
     pipeline.fit_from_scratch(train_input)
@@ -289,21 +342,22 @@ def test_ts_forecasting_lagged_data_operation():
 def test_ts_forecasting_cut_data_operation():
     train_input, predict_input, y_test = get_time_series()
     horizon = train_input.task.task_params.forecast_length
-    operation_cut = CutImplementation(cut_part=0.5)
+    params = OperationParameters(cut_part=0.5)
+    operation_cut = CutImplementation(params=params)
 
-    transformed_input = operation_cut.transform(train_input, is_fit_pipeline_stage=True)
+    transformed_input = operation_cut.transform_for_fit(train_input)
     assert train_input.idx.shape[0] == 2 * transformed_input.idx.shape[0] - horizon
 
 
 def test_ts_forecasting_smoothing_data_operation():
     train_input, predict_input, y_test = get_time_series()
 
-    model_names, _ = OperationTypesRepository().operations_with_tag(tags=['smoothing'])
+    model_names = OperationTypesRepository().operations_with_tag(tags=['smoothing'])
 
     for smoothing_operation in model_names:
-        node_smoothing = PrimaryNode(smoothing_operation)
-        node_lagged = SecondaryNode('lagged', nodes_from=[node_smoothing])
-        node_ridge = SecondaryNode('ridge', nodes_from=[node_lagged])
+        node_smoothing = PipelineNode(smoothing_operation)
+        node_lagged = PipelineNode('lagged', nodes_from=[node_smoothing])
+        node_ridge = PipelineNode('ridge', nodes_from=[node_lagged])
         pipeline = Pipeline(node_ridge)
 
         pipeline.fit_from_scratch(train_input)
@@ -334,11 +388,11 @@ def test_inf_and_nan_absence_after_imputation_implementation_fit_and_transform()
 def test_inf_and_nan_absence_after_pipeline_fitting_from_scratch():
     train_input = get_nan_inf_data()
 
-    model_names, _ = OperationTypesRepository().suitable_operation(task_type=TaskTypesEnum.regression)
+    model_names = OperationTypesRepository().suitable_operation(task_type=TaskTypesEnum.regression)
 
     for model_name in model_names:
-        node_data_operation = PrimaryNode(model_name)
-        node_final = SecondaryNode('linear', nodes_from=[node_data_operation])
+        node_data_operation = PipelineNode(model_name)
+        node_final = PipelineNode('linear', nodes_from=[node_data_operation])
         pipeline = Pipeline(node_final)
 
         # Fit and predict for pipeline
@@ -352,13 +406,13 @@ def test_inf_and_nan_absence_after_pipeline_fitting_from_scratch():
 
 def test_feature_selection_of_single_features():
     for task_type in [TaskTypesEnum.classification, TaskTypesEnum.regression]:
-        model_names, _ = OperationTypesRepository(operation_type='data_operation') \
+        model_names = OperationTypesRepository(operation_type='data_operation') \
             .suitable_operation(tags=['feature_selection'], task_type=task_type)
 
         task = Task(task_type)
 
         for data_operation in model_names:
-            node_data_operation = PrimaryNode(data_operation)
+            node_data_operation = PipelineNode(data_operation)
 
             assert node_data_operation.fitted_operation is None
 
@@ -381,8 +435,8 @@ def test_one_hot_encoding_new_category_in_test():
     train, test = train_test_data_setup(cat_data)
 
     # Create pipeline with encoding operation
-    one_hot_node = PrimaryNode('one_hot_encoding')
-    final_node = SecondaryNode('dt', nodes_from=[one_hot_node])
+    one_hot_node = PipelineNode('one_hot_encoding')
+    final_node = PipelineNode('dt', nodes_from=[one_hot_node])
     pipeline = Pipeline(final_node)
 
     pipeline.fit(train)
@@ -396,8 +450,8 @@ def test_knn_with_float_neighbors():
     Check pipeline with k-nn fit and predict correctly if n_neighbors value
     is float value
     """
-    node_knn = PrimaryNode('knnreg')
-    node_knn.custom_params = {'n_neighbors': 2.5}
+    node_knn = PipelineNode('knnreg')
+    node_knn.parameters = {'n_neighbors': 2.5}
     pipeline = Pipeline(node_knn)
 
     input_data = get_single_feature_data(task=Task(TaskTypesEnum.regression))
@@ -414,7 +468,7 @@ def test_imputation_with_binary_correct():
     nan_data = get_nan_binary_data(task=Task(TaskTypesEnum.classification))
 
     # Create node with imputation operation
-    imputation_node = PrimaryNode('simple_imputation')
+    imputation_node = PipelineNode('simple_imputation')
     imputation_node.fit(nan_data)
     predicted = imputation_node.predict(nan_data)
 
@@ -432,7 +486,7 @@ def test_imputation_binary_features_with_equal_categories_correct():
     """
     nan_data = data_with_binary_int_features_and_equal_categories()
 
-    imputation_node = PrimaryNode('simple_imputation')
+    imputation_node = PipelineNode('simple_imputation')
     imputation_node.fit(nan_data)
     predicted = imputation_node.predict(nan_data)
 
@@ -448,7 +502,7 @@ def test_label_encoding_correct():
     cat_data = data_with_only_categorical_features()
     train_data, test_data = train_test_data_setup(cat_data)
 
-    encoding_node = PrimaryNode('label_encoding')
+    encoding_node = PipelineNode('label_encoding')
     encoding_node.fit(train_data)
 
     predicted_train = encoding_node.predict(train_data)
@@ -476,10 +530,10 @@ def test_lagged_with_multivariate_time_series():
     correct_predict_output = np.array([[8, 9, 18, 19]])
 
     input_data = get_multivariate_time_series()
-    lagged = LaggedTransformationImplementation(**{'window_size': 2})
+    lagged = LaggedTransformationImplementation(OperationParameters(window_size=2))
 
-    transformed_for_fit = lagged.transform(input_data, is_fit_pipeline_stage=True)
-    transformed_for_predict = lagged.transform(input_data, is_fit_pipeline_stage=False)
+    transformed_for_fit = lagged.transform_for_fit(input_data)
+    transformed_for_predict = lagged.transform(input_data)
 
     # Check correctness on fit stage
     lagged_features = transformed_for_fit.predict
@@ -512,9 +566,9 @@ def test_lagged_with_multi_ts_type():
                                    [16., 17.]])
     correct_predict_output = np.array([[8, 9]])
     input_data = get_multivariate_time_series(mutli_ts=True)
-    lagged = LaggedTransformationImplementation(**{'window_size': 2})
-    transformed_for_fit = lagged.transform(input_data, is_fit_pipeline_stage=True)
-    transformed_for_predict = lagged.transform(input_data, is_fit_pipeline_stage=False)
+    lagged = LaggedTransformationImplementation(OperationParameters(window_size=2))
+    transformed_for_fit = lagged.transform_for_fit(input_data)
+    transformed_for_predict = lagged.transform(input_data)
 
     # Check correctness on fit stage
     lagged_features = transformed_for_fit.predict
@@ -543,9 +597,64 @@ def test_poly_features_on_big_datasets():
     train_input.idx = np.arange(len(train_input.features))
     train_input.target = train_input.target[5: 20].reshape((-1, 1))
 
-    poly_node = Pipeline(PrimaryNode('poly_features'))
+    poly_node = Pipeline(PipelineNode('poly_features'))
     poly_node.fit(train_input)
     transformed_features = poly_node.predict(train_input)
 
     n_rows, n_cols = transformed_features.predict.shape
     assert n_cols == 85
+
+
+@pytest.mark.parametrize(
+    'balance_ratio, target_dim, expected',
+    [(None, 1, (12, 2)), (None, 2, (12, 2)),
+     (0.5, 1, (11, 2)), (0.5, 2, (11, 2)),
+     (1.5, 1, (12, 2)), (1.5, 2, (12, 2))]
+)
+def test_correctness_resample_operation_with_expand_minority(balance_ratio, target_dim, expected):
+    params = {'balance': 'expand_minority', 'replace': False, 'balance_ratio': balance_ratio}
+    resample = ResampleImplementation(OperationParameters(**params))
+
+    data = get_unbalanced_dataset(target_dim=target_dim)
+
+    assert resample.transform_for_fit(data).predict.shape == expected
+
+
+@pytest.mark.parametrize(
+    'balance_ratio, target_dim, expected',
+    [(None, 1, (8, 2)), (None, 2, (8, 2)),
+     (0.5, 1, (9, 2)), (0.5, 2, (9, 2)),
+     (1.5, 1, (8, 2)), (1.5, 2, (8, 2))]
+)
+def test_correctness_resample_operation_with_reduce_majority(balance_ratio, target_dim, expected):
+    params = {'balance': 'reduce_majority', 'replace': False, 'balance_ratio': balance_ratio}
+    resample = ResampleImplementation(OperationParameters(**params))
+
+    data = get_unbalanced_dataset(target_dim=target_dim)
+
+    assert resample.transform_for_fit(data).predict.shape == expected
+
+
+@pytest.mark.parametrize(
+    'strategy, balance_ratio, disbalance, expected',
+    [('expand_minority', 0.5, 0.4, True), ('expand_minority', 0.5, 0.2, True),
+     ('expand_minority', 1, 0.4, True), ('expand_minority', 1, 0.2, True),
+     ('expand_minority', 1.5, 0.4, True), ('expand_minority', 1.5, 0.2, True),
+     ('reduce_majority', 0.5, 0.4, False), ('reduce_majority', 0.5, 0.2, False),
+     ('reduce_majority', 1, 0.4, False), ('reduce_majority', 1, 0.2, False),
+     ('reduce_majority', 1.5, 0.4, False), ('reduce_majority', 1.5, 0.2, False)]
+)
+def test_correctness_resample_operation_with_dynamic_replace_param(strategy, balance_ratio, disbalance, expected):
+    """
+    Default params for replace is False.
+    In case of expanding strategy it causes difficulties and needed to change replace param to True.
+    It is required to avoid error in sklearn method, which cannot reuse data if replace is False.
+    """
+    params = {'balance': strategy, 'replace': False, 'balance_ratio': balance_ratio}
+
+    resample = ResampleImplementation(OperationParameters(**params))
+
+    data = get_unbalanced_dataset(size=10, disbalance=disbalance)
+    resample.transform_for_fit(data)
+
+    assert resample.replace == expected

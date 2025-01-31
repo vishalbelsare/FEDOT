@@ -1,17 +1,22 @@
+import logging
 import os
 from typing import Optional
 
 import numpy as np
+from golem.utilities.requirements_notificator import warn_requirement
+
+from fedot.core.operations.operation_parameters import OperationParameters
 
 try:
     import tensorflow as tf
 except ModuleNotFoundError:
-    print('Tensorflow non installed, continue')
+    warn_requirement('tensorflow', 'fedot[extra]')
+    tf = None
 
-from sklearn import preprocessing
 from fedot.core.data.data import InputData, OutputData
-from fedot.core.log import Log, default_log
+from golem.core.log import LoggerAdapter, default_log
 from fedot.core.operations.evaluation.operation_implementations.implementation_interfaces import ModelImplementation
+from sklearn import preprocessing
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -77,12 +82,12 @@ def fit_cnn(train_data: InputData,
             epochs: int = 10,
             batch_size: int = 128,
             optimizer_params: dict = None,
-            logger: Optional[Log] = None):
+            logger: Optional[LoggerAdapter] = None):
     x_train, y_train = train_data.features, train_data.target
     transformed_x_train, transform_flag = check_input_array(x_train)
 
     if logger is None:
-        logger = default_log(__name__)
+        logger = default_log(prefix=__name__)
 
     if transform_flag:
         logger.debug('Train data set was not scaled. The data was divided by 255.')
@@ -102,17 +107,18 @@ def fit_cnn(train_data: InputData,
     model.compile(**optimizer_params)
     model.num_classes = train_data.num_classes
     if logger is None:
-        logger = default_log(__name__)
+        logger = default_log(prefix=__name__)
 
-    if logger.verbosity_level < 4:
+    if logger.logging_level > logging.DEBUG:
         verbose = 0
     else:
         verbose = 2
 
     if epochs is None:
-        logger.warn('The number of training epochs was not set. The selected number of epochs is 10.')
+        logger.warning('The number of training epochs was not set. The selected number of epochs is 10.')
 
-    model.fit(transformed_x_train, y_train, batch_size=batch_size, epochs=epochs, validation_split=0.1, verbose=verbose)
+    model.fit(transformed_x_train, y_train, batch_size=batch_size, epochs=epochs,
+              validation_split=0.1, verbose=verbose)
 
     return model
 
@@ -122,10 +128,10 @@ def predict_cnn(trained_model, predict_data: InputData, output_mode: str = 'labe
     transformed_x_test, transform_flag = check_input_array(x_test)
 
     if logger is None:
-        logger = default_log(__name__)
+        logger = default_log(prefix=__name__)
 
     if np.max(transformed_x_test) > 1:
-        logger.warn('Test data set was not scaled. The data was divided by 255.')
+        logger.warning('Test data set was not scaled. The data was divided by 255.')
 
     if len(x_test.shape) == 3:
         transformed_x_test = np.expand_dims(x_test, -1)
@@ -134,10 +140,17 @@ def predict_cnn(trained_model, predict_data: InputData, output_mode: str = 'labe
         prediction = np.round(trained_model.predict(transformed_x_test))
     elif output_mode in ['probs', 'full_probs', 'default']:
         prediction = trained_model.predict(transformed_x_test)
-        if trained_model.num_classes < 2:
+        num_classes = 0
+
+        try:
+            num_classes = trained_model.num_classes
+        except AttributeError:
+            num_classes = predict_data.num_classes
+
+        if num_classes < 2:
             logger.error('Data set contain only 1 target class. Please reformat your data.')
-            raise NotImplementedError()
-        elif trained_model.num_classes == 2 and output_mode != 'full_probs' and len(prediction.shape) > 1:
+            raise ValueError('Data set contain only 1 target class. Please reformat your data.')
+        elif num_classes == 2 and output_mode != 'full_probs' and len(prediction.shape) > 1:
             prediction = prediction[:, 1]
     else:
         raise ValueError(f'Output model {output_mode} is not supported')
@@ -150,24 +163,20 @@ cnn_model_dict = {'deep': create_deep_cnn,
 
 
 class FedotCNNImplementation(ModelImplementation):
-    def __init__(self, log: Optional[Log] = None, **params: Optional[dict]):
-        super().__init__(log)
-        self.params = {'image_shape': (28, 28, 1),
-                       'num_classes': 2,
-                       'log': default_log(__name__),
-                       'epochs': 10,
-                       'batch_size': 128,
-                       'output_mode': 'labels',
-                       'architecture_type': 'simplified',
-                       'optimizer_parameters': {'loss': "categorical_crossentropy",
-                                                'optimizer': "adam",
-                                                'metrics': ["accuracy"]}}
-        if not params:
-            self.model = cnn_model_dict[self.params['architecture_type']](input_shape=self.params['image_shape'],
-                                                                          num_classes=self.params['num_classes'])
-        else:
-            self.params = {**self.params, **params}
-            self.model = None
+    def __init__(self, params: Optional[OperationParameters] = None):
+        super().__init__(params)
+
+        default_params = {'log': default_log(prefix=__name__),
+                          'epochs': 10,
+                          'batch_size': 32,
+                          'output_mode': 'labels',
+                          'architecture_type': 'simplified',
+                          'optimizer_parameters': {'loss': "categorical_crossentropy",
+                                                   'optimizer': "adam",
+                                                   'metrics': ["accuracy"]}}
+
+        complete_params = {**default_params, **self.params.to_dict()}
+        self.params.update(**complete_params)
 
     def fit(self, train_data):
         """ Method fit model on a dataset
@@ -182,20 +191,18 @@ class FedotCNNImplementation(ModelImplementation):
         else:
             self.classes = np.arange(train_data.target.shape[1])
 
-        if self.model is None:
-            self.model = cnn_model_dict[self.params['architecture_type']](input_shape=self.params['image_shape'],
+        self.model = cnn_model_dict[self.params.get('architecture_type')](input_shape=train_data.features.shape[1:4],
                                                                           num_classes=len(self.classes))
 
-        self.model = fit_cnn(train_data=train_data, model=self.model, epochs=self.params['epochs'],
-                             batch_size=self.params['batch_size'],
-                             optimizer_params=self.params['optimizer_parameters'], logger=self.params['log'])
+        self.model = fit_cnn(train_data=train_data, model=self.model, epochs=self.params.get('epochs'),
+                             batch_size=self.params.get('batch_size'),
+                             optimizer_params=self.params.get('optimizer_parameters'), logger=self.params.get('log'))
         return self.model
 
-    def predict(self, input_data, is_fit_pipeline_stage: Optional[bool] = None):
-        """ Method make prediction with labels of classes
+    def predict(self, input_data):
+        """ Method make prediction with labels of classes for predict stage
 
         :param input_data: data with features to process
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         """
 
         return predict_cnn(trained_model=self.model, predict_data=input_data,
@@ -209,12 +216,12 @@ class FedotCNNImplementation(ModelImplementation):
 
         return predict_cnn(trained_model=self.model, predict_data=input_data, output_mode='probs')
 
-    def get_params(self):
-        """ Method return parameters, which can be optimized for particular
-        operation
-        """
-        return self.params
-
     @property
     def classes_(self):
         return self.classes
+
+    def __deepcopy__(self, memo=None):
+        clone_model = tf.keras.models.clone_model(self.model)
+        clone_model.compile(optimizer=self.model.optimizer, loss=self.model.loss, metrics=self.model.metrics)
+        clone_model.set_weights(self.model.get_weights())
+        return clone_model

@@ -1,13 +1,19 @@
+import os
+
 import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+import pandas as pd
+from sklearn.metrics import mean_absolute_percentage_error
 
 from fedot.core.data.data import InputData
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.data.data_split import train_test_data_setup
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
+from fedot.core.pipelines.pipeline_builder import PipelineBuilder
 from fedot.core.pipelines.ts_wrappers import fitted_values
 from fedot.core.pipelines.ts_wrappers import in_sample_ts_forecast, out_of_sample_ts_forecast, in_sample_fitted_values
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
+from fedot.core.utils import fedot_project_root
 
 
 def prepare_ts_for_in_sample(forecast_length: int, horizon: int):
@@ -24,26 +30,19 @@ def prepare_ts_for_in_sample(forecast_length: int, horizon: int):
     task = Task(TaskTypesEnum.ts_forecasting,
                 TsForecastingParams(forecast_length=forecast_length))
 
-    # To avoid data leak
-    ts_train = ts[:-horizon]
-    train_input = InputData(idx=np.arange(0, len(ts_train)), features=ts_train,
-                            target=ts_train, task=task, data_type=DataTypesEnum.ts)
-
-    start_forecast = len(ts_train)
-    end_forecast = start_forecast + forecast_length
-    predict_input = InputData(idx=np.arange(start_forecast, end_forecast),
-                              features=ts, target=None, task=task,
-                              data_type=DataTypesEnum.ts)
-
+    input_data = InputData(idx=np.arange(0, len(ts)), features=ts,
+                           target=ts, task=task, data_type=DataTypesEnum.ts)
+    train_input, predict_input = train_test_data_setup(input_data,
+                                                       **{'validation_blocks': round(horizon / forecast_length)})
     return train_input, predict_input
 
 
 def get_simple_short_lagged_pipeline():
     # Create simple pipeline for forecasting
-    node_lagged = PrimaryNode('lagged')
+    node_lagged = PipelineNode('lagged')
     # Use 4 elements in time series as predictors
-    node_lagged.custom_params = {'window_size': 4}
-    node_final = SecondaryNode('linear', nodes_from=[node_lagged])
+    node_lagged.parameters = {'window_size': 4}
+    node_final = PipelineNode('linear', nodes_from=[node_lagged])
     pipeline = Pipeline(node_final)
 
     return pipeline
@@ -51,15 +50,15 @@ def get_simple_short_lagged_pipeline():
 
 def get_ts_pipelines_for_testing():
     """ Generate simple specific pipelines for testing """
-    node_lagged = PrimaryNode('sparse_lagged')
-    node_final = SecondaryNode('linear', nodes_from=[node_lagged])
+    node_lagged = PipelineNode('sparse_lagged')
+    node_final = PipelineNode('linear', nodes_from=[node_lagged])
     sparse_lagged_pipeline = Pipeline(node_final)
 
-    node_lagged = PrimaryNode('lagged')
-    node_final = SecondaryNode('linear', nodes_from=[node_lagged])
+    node_lagged = PipelineNode('lagged')
+    node_final = PipelineNode('linear', nodes_from=[node_lagged])
     lagged_pipeline = Pipeline(node_final)
 
-    arima_pipeline = Pipeline(PrimaryNode('arima'))
+    arima_pipeline = Pipeline(PipelineNode('arima'))
     return arima_pipeline, sparse_lagged_pipeline, lagged_pipeline
 
 
@@ -84,26 +83,46 @@ def test_out_of_sample_ts_forecast_correct():
     assert len(multi_predicted) == multi_length
 
 
-def test_in_sample_ts_forecast_correct():
-    simple_length = 2
-    multi_length = 10
-    train_input, predict_input = prepare_ts_for_in_sample(simple_length, multi_length)
+def test_not_simple_in_sample_ts_forecast_correct_for_ar_and_arima():
+    """
+    Test for checking if AR and ARIMA works correctly in insample forecasting task
+    """
+    # horizon
+    forecast_length = 20
+    # one-step horizon
+    one_step_length = 10
+    path = os.path.join(fedot_project_root(), 'examples', 'data', 'ts', 'M4Yearly.csv')
+    time_series = pd.read_csv(path)
+    time_series = time_series[time_series['label'] == 'Y15626']['value']
+    task = Task(TaskTypesEnum.ts_forecasting,
+                TsForecastingParams(forecast_length=forecast_length))
 
-    pipeline = get_simple_short_lagged_pipeline()
-    pipeline.fit(train_input)
+    # generate train/test data
+    idx = np.arange(len(time_series.values))
+    time_series = time_series.values
+    full_series = InputData(idx=idx,
+                            features=time_series,
+                            target=time_series,
+                            task=task,
+                            data_type=DataTypesEnum.ts)
 
-    multi_predicted = in_sample_ts_forecast(pipeline=pipeline,
-                                            input_data=predict_input,
-                                            horizon=multi_length)
+    train_data, test_data = train_test_data_setup(full_series)
+    train_data.task = Task(TaskTypesEnum.ts_forecasting,
+                           TsForecastingParams(forecast_length=one_step_length))
+    full_series.task = Task(TaskTypesEnum.ts_forecasting,
+                            TsForecastingParams(forecast_length=one_step_length))
 
-    # Take validation part of time series
-    time_series = np.array(train_input.features)
-    validation_part = time_series[-multi_length:]
+    pipelines = [PipelineBuilder().add_node('arima').build(),
+                 PipelineBuilder().add_node('smoothing').add_node('ar').build()]
+    for pipeline in pipelines:
+        pipeline.fit(train_data)
+        # making insample forecast
+        predict = in_sample_ts_forecast(pipeline=pipeline,
+                                        input_data=full_series,
+                                        horizon=forecast_length)
 
-    metric = mean_absolute_error(validation_part, multi_predicted)
-    is_forecast_correct = True
-
-    assert is_forecast_correct
+        assert mean_absolute_percentage_error(y_true=test_data.target,
+                                              y_pred=predict) < 1
 
 
 def test_in_sample_ts_models_forecast_correct():

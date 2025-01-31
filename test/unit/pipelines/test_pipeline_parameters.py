@@ -3,8 +3,6 @@ import numpy as np
 from fedot.core.data.data import InputData
 from fedot.core.repository import tasks
 from fedot.core.repository.dataset_types import DataTypesEnum
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
-from fedot.core.pipelines.pipeline import Pipeline
 from test.unit.tasks.test_forecasting import get_simple_ts_pipeline
 
 
@@ -29,15 +27,14 @@ def test_parameters_changed_correct():
 
     # Get simple pipeline for time series forecasting
     ts_pipeline = get_simple_ts_pipeline()
-
-    # Fit pipeline with inconceivably incorrect parameters (window_size will be corrected to 2)
+    ts_pipeline.nodes[-1].parameters = {'window_size': 8}
     ts_pipeline.fit(input_ts)
 
     # Correct window_size parameter to new value
-    ts_pipeline.nodes[1].custom_params = {'window_size': 3}
+    ts_pipeline.nodes[1].parameters = {'window_size': 3}
 
     content_params = ts_pipeline.nodes[1].content['params']
-    custom_params = ts_pipeline.nodes[1].custom_params
+    custom_params = ts_pipeline.nodes[1].parameters
     descriptive_id = ts_pipeline.nodes[1].descriptive_id
     assert content_params == custom_params
     assert '3' in descriptive_id

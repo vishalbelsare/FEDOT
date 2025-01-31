@@ -1,3 +1,9 @@
+.. |eng| image:: https://img.shields.io/badge/lang-en-red.svg
+   :target: /README_en.rst
+
+.. |rus| image:: https://img.shields.io/badge/lang-ru-yellow.svg
+   :target: /README.rst
+
 .. image:: docs/fedot_logo.png
    :alt: Logo of FEDOT framework
 
@@ -6,9 +12,9 @@
    :stub-columns: 1
 
    * - package
-     - | |pypi| |py_6| |py_7| |py_8|
+     - | |pypi| |python|
    * - tests
-     - | |build| |coverage|
+     - | |build| |integration| |coverage|
    * - docs
      - |docs|
    * - license
@@ -17,105 +23,98 @@
      - | |downloads_stats|
    * - support
      - | |tg|
-
-
+   * - languages
+     - | |eng| |rus|
+   * - mirror
+     - | |gitlab|
+   * - funding
+     - | |ITMO| |NCCR|
 .. end-badges
 
-This repository contains FEDOT - an open-source framework for automated modeling and machine learning (AutoML). It can build custom modeling pipelines for different real-world processes in an automated way using an evolutionary approach. FEDOT supports classification (binary and multiclass), regression, clustering, and time series prediction tasks.
+**FEDOT** - это open-source фреймворк для решения задач из области автоматизированного моделирования и машинного обучения (AutoML). Фреймворк распространяется под лицензией 3-Clause BSD.
 
-.. image:: https://itmo-nss-team.github.io/FEDOT.Docs/img/pipeline_small.png
-   :alt: The structure of the modeling pipeline that can be optimised by FEDOT
+FEDOT предоставляет возможность использовать генеративный дизайн для проектирования пайплайнов машинного обучения для различных реальных задач. Ядро фреймворка основано на эволюционном подходе и поддерживает классификацию (бинарную и мультиклассовую), регрессию, и задачи прогнозирования временных рядов.
 
-The main feature of the framework is the complex management of interactions between various blocks of pipelines. First of all, this includes the stage of machine learning model design. FEDOT allows you to not just choose the best type of the model, but to create a complex (composite) model. It allows you to combine several models of different complexity, which helps you to achieve better modeling quality than when using any of these models separately. Within the framework, we describe composite models in the form of a graph defining the connections between data preprocessing blocks and model blocks.
+.. image:: docs/fedot-workflow.png
+   :alt: Реализация процесса автоматического машинного обучения в FEDOT
 
-The framework is not limited to specific AutoML tasks (such as pre-processing of input data, feature selection, or optimization of model hyperparameters), but allows you to solve a more general structural learning problem - for a given data set, a solution is built in the form of a graph (DAG), the nodes of which are represented by ML models, pre-processing procedures, and data transformation.
+Ключевой особенностью фреймворка является управление сложными взаимодействиями между различными частями пайплайнов. Они представлены в виде графа, который определяет связи между предварительной обработкой данных и блоками модели.
 
-The project is maintained by the research team of the Natural Systems Simulation Lab, which is a part of the National Center for Cognitive Research of ITMO University.
+Проект поддерживается исследовательской группой Natural Systems Simulation Lab, которая является частью `Национального центра когнитивных разработок Университета ИТМО <https://actcognitive.org/>`__.
 
-
-The intro video about Fedot is available here:
+Более подробная информация о FEDOT доступна в следующем видео:
 
 
 .. image:: https://res.cloudinary.com/marcomontalbano/image/upload/v1606396758/video_to_markdown/images/youtube--RjbuV6i6de4-c05b58ac6eb4c4700831b2b3070cd403.jpg
    :target: http://www.youtube.com/watch?v=RjbuV6i6de4
    :alt: Introducing Fedot
 
-FEDOT features
-==============
+Концепции FEDOT'а
+=================
 
-The main features of the framework are as follows:
+- **Гибкость.** FEDOT может быть использован для автоматизации поиска решений для различных `классов задач <https://fedot.readthedocs.io/en/master/introduction/fedot_features/main_features.html#involved-tasks>`_, `типов данных <https://fedot.readthedocs.io/en/master/introduction/fedot_features/automation_features.html#data-nature>`_ (тексты, изображения, таблицы), и `моделей <https://fedot.readthedocs.io/en/master/advanced/automated_pipelines_design.html>`_;
+- **Расширяемость.** Алгоритмы для оптимизации пайплайнов не зависят от вида данных и задач, однако можно использовать `специальные стратегии <https://fedot.readthedocs.io/en/master/api/strategies.html>`_ для определенных классов задач или типов данных (прогнозирование временных рядов, NLP, табличные данные и т.д.) для повышения эффективности;
+- **Интегрируемость.** FEDOT поддерживает широко используемые библиотеки МО (Scikit-learn, CatBoost, XGBoost и т.д.) и позволяет интегрировать `пользовательские библиотеки <https://fedot.readthedocs.io/en/master/api/strategies.html#module-fedot.core.operations.evaluation.custom>`_;
+- **Тюнингуемость.** Поддерживаются различные методы `настройки гиперпараметров <https://fedot.readthedocs.io/en/master/advanced/hyperparameters_tuning.html>`_, включая пользовательские метрики оценивания и пространства параметров моделей;
+- **Универсальность.** FEDOT `не ограничивается конкретными задачами моделирования <https://fedot.readthedocs.io/en/master/advanced/architecture.html>`_, например, его можно использовать в ODE или PDE;
+- **Воспроизводимость.** Получаемые паплайны можно `экспортировать в формате JSON отдельно <https://fedot.readthedocs.io/en/master/advanced/pipeline_import_export.html>`_ или `вместе с входными данными в формате архива ZIP <https://fedot.readthedocs.io/en/master/advanced/project_import_export.html>`_, для воспроизведения экспериментов;
+- **Кастомизируемость.** FEDOT позволяет `настраивать сложность моделей <https://fedot.readthedocs.io/en/master/introduction/fedot_features/automation_features.html#models-used>`_, тем самым, получать необходимое качество.
 
-- The FEDOT architecture is highly flexible and therefore the framework can be used to automate the creation of mathematical models for various problems, types of data, and models;
-- FEDOT already supports popular ML libraries (scikit-learn, keras, statsmodels, etc.), but you can also integrate custom tools into the framework if necessary;
-- Pipeline optimization algorithms are not tied to specific data types or tasks, but you can use special templates for a specific task class or data type (time series forecasting, NLP, tabular data, etc.) to increase the efficiency;
-- The framework is not limited only to machine learning, it is possible to embed models related to specific areas into pipelines (for example, models in ODE or PDE);
-- Additional methods for hyperparameters tuning can be seamlessly integrated into FEDOT (in addition to those already supported);
-- The resulting pipelines can be exported in a human-readable JSON format, which allows you to achieve reproducibility of the experiments.
+Установка
+=========
 
-Thus, compared to other frameworks, FEDOT:
+- Cистема управления пакетами **pip**
 
-- Is not limited to specific modeling tasks and claims versatility and expandability;
-- Allows managing the complexity of models and thereby achieving better results.
-- Allows building models using input data of various nature (texts, images, tables, etc.) and consisting of different types of models.
-
-Installation
-============
-
-Common installation:
+Самый простой способ установить FEDOT - это использовать ``pip``:
 
 .. code-block::
 
   $ pip install fedot
 
-In order to work with FEDOT source code:
+Установка с дополнительными зависимостями для обработки изображений и текста, а также для DNN:
 
 .. code-block::
 
-   $ git clone https://github.com/nccr-itmo/FEDOT.git
-   $ cd FEDOT
-   $ pip install -r requirements.txt
-   $ pytest -s test
+  $ pip install fedot[extra]
 
+- Контенер **Docker**
 
-How to use
-============================
+Информацию по доступным образам можно посмотреть `здесь <https://github.com/aimclub/FEDOT/tree/master/docker/README.rst>`_.
 
-FEDOT provides a high-level API that allows you to use its capabilities in a simple way.
-At the moment, the API can be used for classification and regression tasks only.
-But the time series forecasting and clustering support will be implemented soon (you can still solve these tasks via advanced initialization, see below).
-Input data must be either in NumPy arrays or CSV files.
+Как использовать
+================
 
-To use the API, follow these steps:
+FEDOT предоставляет высокоуровневый API, который удобно использовать. API может использоваться для задач классификации, регрессии и прогнозирования временных рядов.
 
-1. Import Fedot class
+Чтобы использовать API, выполните следующие действия:
+
+1. Импортируйте класс ``Fedot``
 
 .. code-block:: python
 
  from fedot.api.main import Fedot
 
-2. Initialize the Fedot object and define the type of modeling problem. It provides a fit/predict interface:
+2. Инициализируйте объект FEDOT и задайте тип задачи моделирования. Объект предоставит интерфейс fit/predict:
 
-- fedot.fit runs the optimization and returns the resulting composite model;
-- fedot.predict returns the prediction for the given input data;
-- fedot.get_metrics estimates the quality of predictions using selected metrics
+- ``Fedot.fit()`` запускает оптимизацию и возвращает получившийся составной пайплайн;
+- ``Fedot.predict()`` прогнозирует целевые значения для заданных входных данных, используя уже полученный пайплайн;
+- ``Fedot.get_metrics()`` оценивает качество предсказаний с использованием выбранных показателей.
 
-Numpy arrays, pandas data frames, and file paths can be used as sources of input data.
+В качестве источников входных данных могут использоваться массивы NumPy, датафреймы Pandas и путь к файлу. В приведенном ниже примере ``x_train``, ``y_train`` и ``x_test`` являются ``numpy.ndarray()``:
 
 .. code-block:: python
 
- model = Fedot(problem='classification')
+    model = Fedot(problem='classification', timeout=5, preset='best_quality', n_jobs=-1)
+    model.fit(features=x_train, target=y_train)
+    prediction = model.predict(features=x_test)
+    metrics = model.get_metrics(target=y_test)
 
- model.fit(features=train_data.features, target=train_data.target)
- prediction = model.predict(features=test_data.features)
+Более подробная информация об API доступна в `документации <https://fedot.readthedocs.io/en/latest/api/api.html>`__, а более сложные примеры показаны `в этом разделе <https://github.com/aimclub/FEDOT/tree/master/examples/advanced>`__.
 
- metrics = model.get_metrics()
+Примеры
+=======
 
-For more advanced approaches, please use Examples & Tutorials section.
-
-Examples & Tutorials
-====================
-
-Jupyter notebooks with tutorials are located in the `examples repository <https://github.com/ITMO-NSS-team/fedot-examples>`__. There you can find the following guides:
+Jupyter ноутбуки с примерами находятся в репозитории `fedot-examples <https://github.com/ITMO-NSS-team/fedot-examples>`__. Там вы можете найти следующие руководства:
 
 * `Intro to AutoML <https://github.com/ITMO-NSS-team/fedot-examples/blob/main/notebooks/latest/1_intro_to_automl.ipynb>`__
 * `Intro to FEDOT functionality <https://github.com/ITMO-NSS-team/fedot-examples/blob/main/notebooks/latest/2_intro_to_fedot.ipynb>`__
@@ -124,28 +123,28 @@ Jupyter notebooks with tutorials are located in the `examples repository <https:
 * `Gap-filling in time series and out-of-sample forecasting <https://github.com/ITMO-NSS-team/fedot-examples/blob/main/notebooks/latest/5_ts_specific_cases.ipynb>`__
 * `Hybrid modelling with custom models <https://github.com/ITMO-NSS-team/fedot-examples/blob/main/notebooks/latest/6_hybrid_modelling.ipynb>`__
 
-Notebooks are issued with the corresponding release versions (the default version is 'latest').
+Версии ноутбуков выпускаются в соответствии с версиями релизов (версия по умолчанию - "latest").
 
-Also, external examples are available:
+Также доступны примеры на внешних платформах:
 
 * `Kaggle: baseline for Microsoft Stock - Time Series Analysis task <https://www.kaggle.com/dreamlone/microsoft-stocks-price-prediction-automl>`__
 
-Extended examples:
+Расширенные примеры:
 
-- Credit scoring problem, i.e. `binary classification task <https://github.com/nccr-itmo/FEDOT/blob/master/cases/credit_scoring/credit_scoring_problem.py>`__
-- Time series forecasting, i.e. `random process regression <https://github.com/nccr-itmo/FEDOT/blob/master/cases/metocean_forecasting_problem.py>`__
-- Spam detection, i.e. `natural language preprocessing <https://github.com/nccr-itmo/FEDOT/blob/master/cases/spam_detection.py>`__
-- Movie rating prediction with `multi-modal data <https://github.com/nccr-itmo/FEDOT/blob/master/cases/multi_modal_rating_prediction.py>`__
+- Задача с кредитным скорингом `binary classification task <https://github.com/aimclub/FEDOT/blob/master/examples/real_cases/credit_scoring/credit_scoring_problem.py>`__
+- Прогнозирование временных рядов `random process regression <https://github.com/aimclub/FEDOT/blob/master/examples/real_cases/metocean_forecasting_problem.py>`__
+- Обнаружение спама `natural language preprocessing <https://github.com/aimclub/FEDOT/blob/master/examples/real_cases/spam_detection.py>`__
+- Предсказание сорта вина `multi-modal data <https://github.com/aimclub/FEDOT/blob/master/examples/advanced/multimodal_text_num_example.py>`__
 
 
-Also, several video tutorials are `available <https://www.youtube.com/playlist?list=PLlbcHj5ytaFUjAxpZf7FbEaanmqpDYhnc>`__ (in Russian).
+Также доступно несколько `видео уроков <https://www.youtube.com/playlist?list=PLlbcHj5ytaFUjAxpZf7FbEaanmqpDYhnc>`__ (на русском).
 
-Publications about FEDOT
-========================
+Публикации о FEDOT
+==================
 
-We also published several posts and news devoted to the different aspects of the framework:
+Мы опубликовали несколько постов о различных аспектах фреймворка:
 
-In English:
+На английском:
 
 - How AutoML helps to create composite AI? - `towardsdatascience.com <https://towardsdatascience.com/how-automl-helps-to-create-composite-ai-f09e05287563>`__
 - AutoML for time series: definitely a good idea - `towardsdatascience.com <https://towardsdatascience.com/automl-for-time-series-definitely-a-good-idea-c51d39b2b3f>`__
@@ -153,88 +152,95 @@ In English:
 - Winning a flood-forecasting hackathon with hydrology and AutoML - `towardsdatascience.com <https://towardsdatascience.com/winning-a-flood-forecasting-hackathon-with-hydrology-and-automl-156a8a7a4ede>`__
 - Clean AutoML for “Dirty” Data - `towardsdatascience.com <https://towardsdatascience.com/clean-automl-for-dirty-data-how-and-why-to-automate-preprocessing-of-tables-in-machine-learning-d79ac87780d3>`__
 - FEDOT as a factory of human-competitive results - `youtube.com <https://www.youtube.com/watch?v=9Rhqcsrolb8&ab_channel=NSS-Lab>`__
+- Hyperparameters Tuning for Machine Learning Model Ensembles - `towardsdatascience.com <https://towardsdatascience.com/hyperparameters-tuning-for-machine-learning-model-ensembles-8051782b538b>`__
 
-In Russian:
+На русском:
 
-- General concepts of evolutionary design for composite pipelines - `habr.com <https://habr.com/ru/company/spbifmo/blog/558450>`__
-- Automated time series forecasting with FEDOT - `habr.com <https://habr.com/ru/post/559796/>`__
-- Details of FEDOT-based solution for Emergency DataHack - `habr.com <https://habr.com/ru/post/577886/>`__
-- Data preprocessing in AutoML - `ODS blog <https://habr.com/ru/company/ods/blog/657525/>`__
-- FEDOT in open-source section of Highload++ 2022 conference - `presentation <https://docs.yandex.ru/docs/view?url=ya-disk-public%3A%2F%2Fi27LScu3s3IIHDzIXt9O5EiEAMl6ThY6QLu3X1oYH%2FFiAl%2BLcNp4O4yTSYd2gRZnW5aDQ4kMZEXE%2BwNjbq78ug%3D%3D%3A%2F%D0%94%D0%B5%D0%BD%D1%8C%201%2F4.%D0%A1%D0%B8%D0%BD%D0%BD%D0%B0%D0%BA%D1%81%2F9.Open%20source-%D1%82%D1%80%D0%B8%D0%B1%D1%83%D0%BD%D0%B0_HL_FEDOT.pptx&name=9.Open%20source-%D1%82%D1%80%D0%B8%D0%B1%D1%83%D0%BD%D0%B0_HL_FEDOT.pptx>`__
+- Как AutoML помогает создавать модели композитного ИИ — говорим о структурном обучении и фреймворке FEDOT - `habr.com <https://habr.com/ru/company/spbifmo/blog/558450>`__
+- Прогнозирование временных рядов с помощью AutoML - `habr.com <https://habr.com/ru/post/559796/>`__
+- Как мы “повернули реки вспять” на Emergency DataHack 2021, объединив гидрологию и AutoML - `habr.com <https://habr.com/ru/post/577886/>`__
+- Чистый AutoML для “грязных” данных: как и зачем автоматизировать предобработку таблиц в машинном обучении - `ODS blog <https://habr.com/ru/company/ods/blog/657525/>`__
+- Фреймворк автоматического машинного обучения FEDOT (Конференция Highload++ 2022) - `presentation <https://docs.yandex.ru/docs/view?url=ya-disk-public%3A%2F%2Fi27LScu3s3IIHDzIXt9O5EiEAMl6ThY6QLu3X1oYH%2FFiAl%2BLcNp4O4yTSYd2gRZnW5aDQ4kMZEXE%2BwNjbq78ug%3D%3D%3A%2F%D0%94%D0%B5%D0%BD%D1%8C%201%2F4.%D0%A1%D0%B8%D0%BD%D0%BD%D0%B0%D0%BA%D1%81%2F9.Open%20source-%D1%82%D1%80%D0%B8%D0%B1%D1%83%D0%BD%D0%B0_HL_FEDOT.pptx&name=9.Open%20source-%D1%82%D1%80%D0%B8%D0%B1%D1%83%D0%BD%D0%B0_HL_FEDOT.pptx>`__
+- Про настройку гиперпараметров ансамблей моделей машинного обучения - `habr.com <https://habr.com/ru/post/672486/>`__
 
-In Chinese:
+На китайском:
 
-- Presentation of FEDOT in Open innovations 2.0 conference - `youtube.com <https://www.youtube.com/watch?v=PEET0EbCSCY>`__
+- 生成式自动机器学习系统 (презентация на конференции "Open Innovations 2.0") - `youtube.com <https://www.youtube.com/watch?v=PEET0EbCSCY>`__
 
 
-Project structure
+Структура проекта
 =================
 
-The latest stable release of FEDOT is on the `master branch <https://github.com/nccr-itmo/FEDOT/tree/master>`__.
+Последняя стабильная версия FEDOT находится в `ветке master <https://github.com/aimclub/FEDOT/tree/master>`__.
 
-The repository includes the following directories:
+Репозиторий включает в себя следующие директории:
 
-* Package `core <https://github.com/nccr-itmo/FEDOT/tree/master/fedot/core>`__  contains the main classes and scripts. It is the *core* of FEDOT framework
-* Package `examples <https://github.com/nccr-itmo/FEDOT/tree/master/examples>`__ includes several *how-to-use-cases* where you can start to discover how FEDOT works
-* All *unit and integration tests* can be observed in the `test <https://github.com/nccr-itmo/FEDOT/tree/master/test>`__ directory
-* The sources of the documentation are in the `docs <https://github.com/nccr-itmo/FEDOT/tree/master/docs>`__
+* В пакете `core <https://github.com/aimclub/FEDOT/tree/master/fedot/core>`__  находятся основные классы и скрипты. Это *ядро* фреймворка FEDOT.
+* В пакете `examples <https://github.com/aimclub/FEDOT/tree/master/examples>`__ собраны несколько примеров использования, с которых можно начать знакомство с FEDOT.
+* Все тесты (unit и интеграционные) находятся в папке `test <https://github.com/aimclub/FEDOT/tree/master/test>`__.
+* Документация находится в папке `docs <https://github.com/aimclub/FEDOT/tree/master/docs>`__.
 
-Also, you can check `benchmarking <https://github.com/ITMO-NSS-team/FEDOT-benchmarks>`__ a repository that was developed to provide a comparison of FEDOT against some well-known AutoML frameworks.
+Текущие исследования/разработки и планы на будущее
+==================================================
 
-Current R&D and future plans
-============================
+В настоящее время мы работаем над новыми функциями и пытаемся улучшить производительность и удобство использования FEDOT.
+Основные текущие задачи и планы:
 
-Currently, we are working on new features and trying to improve the performance and the user experience of FEDOT.
-The major ongoing tasks and plans:
-
-* Effective and ready-to-use pipeline templates for certain tasks and data types;
-* Integration with GPU via Rapids framework;
-* Alternative optimization methods of fixed-shaped pipelines;
-* Integration with MLFlow for import and export of the pipelines;
-* Improvement of high-level API.
+* Реализация большой языковой модели для задач автоматического машинного обучения в `FEDOT.LLM <https://github.com/ITMO-NSS-team/FEDOT.LLM>`__.
+* Реализация методов и алгоритмов мета-обучения в `GAMLET <https://github.com/ITMO-NSS-team/GAMLET>`__.
+* Повышение эффективности оптимизационного ядра `GOLEM <https://github.com/aimclub/GOLEM/>`__.
+* Поддержка более сложных вариантов пайплайнов, особенно для задач прогнозирования временных рядов.
 
 
-Also, we are doing several research tasks related to AutoML time-series benchmarking and multi-modal modeling.
+Кроме того, мы работаем над рядом исследовательских задач, связанных с бенчмаркингом прогнозирования временных рядов с помощью AutoML и мультимодального моделирования.
 
-Any contribution is welcome. Our R&D team is open for cooperation with other scientific teams as well as with industrial partners.
+Наша научно-исследовательская команда открыта для сотрудничества с другими научными коллективами, а также с партнерами из индустрии.
 
-Documentation
-=============
-
-The general description is available in `FEDOT.Docs <https://itmo-nss-team.github.io/FEDOT.Docs>`__ repository.
-
-Also, a detailed FEDOT API description is available in the `Read the Docs <https://fedot.readthedocs.io/en/latest/>`__.
-
-Contribution Guide
-==================
-
-- The contribution guide is available in the `repository <https://github.com/nccr-itmo/FEDOT/blob/master/docs/source/contribution.rst>`__.
-
-Acknowledgments
-================
-
-We acknowledge the contributors for their important impact and the participants of the numerous scientific conferences and workshops for their valuable advice and suggestions.
-
-Side projects
-=============
-- The prototype of web-GUI for FEDOT is available in `FEDOT.WEB <https://github.com/nccr-itmo/FEDOT.Web>`__ repository.
-
-
-Contacts
-========
-- `Telegram channel for solving problems and answering questions on FEDOT <https://t.me/FEDOT_helpdesk>`_
-- `Natural System Simulation Team <https://itmo-nss-team.github.io/>`_
-- `Anna Kalyuzhnaya <https://scholar.google.com/citations?user=bjiILqcAAAAJ&hl=ru>`_, team leader (anna.kalyuzhnaya@itmo.ru)
-- `Newsfeed <https://t.me/NSS_group>`_
-- `Youtube channel <https://www.youtube.com/channel/UC4K9QWaEUpT_p3R4FeDp5jA>`_
-
-Supported by
+Документация
 ============
 
-- `National Center for Cognitive Research of ITMO University <https://actcognitive.org/>`_
+Подробное описание FEDOT API доступно в разделе `Read the Docs <https://fedot.readthedocs.io/en/latest/>`__.
 
-Citation
+Как участвовать
+===============
+
+- Инструкция для добавления изменений находится в `репозитории <https://github.com/aimclub/FEDOT/blob/master/docs/source/contribution.rst>`__.
+
+Благодарности
+=============
+
+Мы благодарны контрибьютерам за их важный вклад, а участникам многочисленных конференций и семинаров - за их ценные советы и предложения.
+
+
+Финансирование
+==============
+
+Реализовано при финансовой поддержке Фонда поддержки проектов
+Национальной технологической инициативы в рамках реализации "дорожной карты"
+развития высокотехнологичного направления "Искусственный интеллект" на период до 2030 года (Договор № 70-2021-00187)
+
+Дополнительные проекты
+======================
+- Оптимизационное ядро, вынесенное в библиотеку GOLEM.
+- Прототип web-GUI для FEDOT доступен в `FEDOT.WEB <https://github.com/aimclub/FEDOT.Web>`__ репозитории.
+- Прототип реализации Meta-AutoML - MetaFEDOT.
+- Прототип реализации LLM для AutoML - FEDOT.LLM.
+
+Контакты
 ========
+- `Telegram-канал <https://t.me/FEDOT_helpdesk>`_  для решения проблем и ответов на вопросы о FEDOT
+- Команда `Natural System Simulation <https://itmo-nss-team.github.io/>`_
+- `Анна Калюжная <https://scholar.google.com/citations?user=bjiILqcAAAAJ&hl=ru>`_, руководитель (anna.kalyuzhnaya@itmo.ru)
+- `Новостной Telegram-канал <https://t.me/NSS_group>`_
+- `Youtube канал <https://www.youtube.com/channel/UC4K9QWaEUpT_p3R4FeDp5jA>`_
+
+Разработка ведётся при поддержке
+================================
+
+- `Национальный центр когнитивных разработок Университета ИТМО <https://actcognitive.org/>`_
+
+Цитирование
+===========
 
 @article{nikitin2021automated,
   title = {Automated evolutionary approach for the design of composite machine learning pipelines},
@@ -252,44 +258,49 @@ Citation
   pages={926-933},
   doi={10.1109/CEC45853.2021.9504773}}
 
-
-Other papers - in `ResearchGate <https://www.researchgate.net/project/Evolutionary-multi-modal-AutoML-with-FEDOT-framework>`_.
-
 .. |docs| image:: https://readthedocs.org/projects/ebonite/badge/?style=flat
    :target: https://fedot.readthedocs.io/en/latest/
    :alt: Documentation Status
 
-.. |build| image:: https://github.com/nccr-itmo/FEDOT/workflows/Build/badge.svg?branch=master
+.. |build| image:: https://github.com/aimclub/FEDOT/actions/workflows/unit-build.yml/badge.svg
    :alt: Build Status
-   :target: https://github.com/nccr-itmo/FEDOT/actions
+   :target: https://github.com/aimclub/FEDOT/actions/workflows/unit-build.yml
 
-.. |coverage| image:: https://codecov.io/gh/nccr-itmo/FEDOT/branch/master/graph/badge.svg
+.. |integration| image:: https://github.com/aimclub/FEDOT/actions/workflows/integration-build.yml/badge.svg
+   :alt: Integration Build Status
+   :target: https://github.com/aimclub/FEDOT/actions/workflows/integration-build.yml
+
+.. |coverage| image:: https://codecov.io/gh/aimclub/FEDOT/branch/master/graph/badge.svg
    :alt: Coverage Status
-   :target: https://codecov.io/gh/nccr-itmo/FEDOT
+   :target: https://codecov.io/gh/aimclub/FEDOT
 
 .. |pypi| image:: https://badge.fury.io/py/fedot.svg
    :alt: Supported Python Versions
    :target: https://badge.fury.io/py/fedot
 
-.. |py_6| image:: https://img.shields.io/badge/python_3.6-passing-success
+.. |python| image:: https://img.shields.io/pypi/pyversions/fedot.svg
    :alt: Supported Python Versions
-   :target: https://img.shields.io/badge/python_3.6-passing-success
+   :target: https://img.shields.io/pypi/pyversions/fedot
 
-.. |py_7| image:: https://img.shields.io/badge/python_3.7-passing-success
+.. |license| image:: https://img.shields.io/github/license/aimclub/FEDOT
    :alt: Supported Python Versions
-   :target: https://img.shields.io/badge/python_3.7-passing-success
-
-.. |py_8| image:: https://img.shields.io/badge/python_3.8-passing-success
-   :alt: Supported Python Versions
-   :target: https://img.shields.io/badge/python_3.8-passing-success
-
-.. |license| image:: https://img.shields.io/github/license/nccr-itmo/FEDOT
-   :alt: Supported Python Versions
-   :target: https://github.com/nccr-itmo/FEDOT/blob/master/LICENSE.md
+   :target: https://github.com/aimclub/FEDOT/blob/master/LICENSE.md
 
 .. |downloads_stats| image:: https://static.pepy.tech/personalized-badge/fedot?period=total&units=international_system&left_color=grey&right_color=brightgreen&left_text=Downloads
    :target: https://pepy.tech/project/fedot
 
 .. |tg| image:: https://img.shields.io/badge/Telegram-Group-blue.svg
-          :target: https://t.me/FEDOT_helpdesk
-          :alt: Telegram Chat
+   :target: https://t.me/FEDOT_helpdesk
+   :alt: Telegram Chat
+
+.. |ITMO| image:: https://raw.githubusercontent.com/aimclub/open-source-ops/43bb283758b43d75ec1df0a6bb4ae3eb20066323/badges/ITMO_badge_rus.svg
+   :alt: Acknowledgement to ITMO
+   :target: https://itmo.ru
+
+.. |NCCR| image:: https://raw.githubusercontent.com/aimclub/open-source-ops/43bb283758b43d75ec1df0a6bb4ae3eb20066323/badges/NCCR_badge.svg
+   :alt: Acknowledgement to NCCR
+   :target: https://actcognitive.org/
+
+.. |gitlab| image:: https://img.shields.io/badge/mirror-GitLab-orange
+   :alt: GitLab mirror for this repository
+   :target: https://gitlab.actcognitive.org/itmo-nss-team/FEDOT

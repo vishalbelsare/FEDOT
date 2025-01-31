@@ -1,17 +1,18 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from golem.core.tuning.simultaneous import SimultaneousTuner
 from hyperopt import hp
 from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_squared_error
 
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.tuning.search_space import SearchSpace
-from fedot.core.pipelines.tuning.unified import PipelineTuner
+from fedot.core.pipelines.tuning.search_space import PipelineSearchSpace
+from fedot.core.pipelines.tuning.tuner_builder import TunerBuilder
 from fedot.core.repository.dataset_types import DataTypesEnum
+from fedot.core.repository.metrics_repository import RegressionMetricsEnum
 from fedot.core.repository.tasks import TaskTypesEnum, Task, TsForecastingParams
 
 
@@ -45,14 +46,14 @@ def get_domain_pipeline():
         Pipeline looking like this
         lagged -> custom -> ridge
     """
-    lagged_node = PrimaryNode('lagged')
-    lagged_node.custom_params = {'window_size': 50}
+    lagged_node = PipelineNode('lagged')
+    lagged_node.parameters = {'window_size': 50}
 
     # For custom model params as initial approximation and model as function is necessary
-    custom_node = SecondaryNode('custom', nodes_from=[lagged_node])
-    custom_node.custom_params = {"a": -50, "b": 500, 'model_predict': domain_model_imitation_predict}
+    custom_node = PipelineNode('custom', nodes_from=[lagged_node])
+    custom_node.parameters = {"a": -50, "b": 500, 'model_predict': domain_model_imitation_predict}
 
-    node_final = SecondaryNode('ridge', nodes_from=[custom_node])
+    node_final = PipelineNode('ridge', nodes_from=[custom_node])
     pipeline = Pipeline(node_final)
 
     return pipeline
@@ -63,16 +64,16 @@ def get_fitting_custom_pipeline():
         Pipeline looking like this
         lagged -> custom -> ridge
     """
-    lagged_node = PrimaryNode('lagged')
-    lagged_node.custom_params = {'window_size': 50}
+    lagged_node = PipelineNode('lagged')
+    lagged_node.parameters = {'window_size': 50}
 
     # For custom model params as initial approximation and model as function is necessary
-    custom_node = SecondaryNode('custom', nodes_from=[lagged_node])
-    custom_node.custom_params = {'alpha': 5,
-                                 'model_predict': custom_ml_model_imitation_predict,
-                                 'model_fit': custom_ml_model_imitation_fit}
+    custom_node = PipelineNode('custom', nodes_from=[lagged_node])
+    custom_node.parameters = {'alpha': 5,
+                              'model_predict': custom_ml_model_imitation_predict,
+                              'model_fit': custom_ml_model_imitation_fit}
 
-    node_final = SecondaryNode('lasso', nodes_from=[custom_node])
+    node_final = PipelineNode('lasso', nodes_from=[custom_node])
     pipeline = Pipeline(node_final)
 
     return pipeline
@@ -93,33 +94,40 @@ def run_pipeline_tuning(time_series, len_forecast, pipeline_type):
         # Setting custom search space for tuner (necessary)
         # model and output_type should be wrapped into hyperopt
         custom_search_space = {'custom': {
-            'alpha': (hp.uniform, [0.01, 10]),
-            'model_predict': (hp.choice, [[custom_ml_model_imitation_predict]]),
-            'model_fit': (hp.choice, [[custom_ml_model_imitation_fit]])}}
+            'alpha': {
+                'hyperopt-dist': hp.uniform,
+                'sampling-scope': [0.01, 10],
+                'type': 'continuous'}}}
     elif pipeline_type == 'without_fit':
         pipeline = get_domain_pipeline()
         # Setting custom search space for tuner (necessary)
         # model and output_type should be wrapped into hyperopt
-        custom_search_space = {'custom': {'a': (hp.uniform, [-100, 100]),
-                                          'b': (hp.uniform, [0, 1000]),
-                                          'model_predict': (hp.choice, [[domain_model_imitation_predict]])}}
+        custom_search_space = {'custom': {
+            'a': {
+                'hyperopt-dist': hp.uniform,
+                'sampling-scope': [-100, 100],
+                'type': 'continuous'},
+            'b': {
+                'hyperopt-dist': hp.uniform,
+                'sampling-scope': [0, 1000],
+                'type': 'continuous'}}}
     pipeline.fit_from_scratch(train_input)
     pipeline.print_structure()
     # Get prediction with initial approximation
     predicted_before_tuning = pipeline.predict(predict_input).predict
 
     replace_default_search_space = True
-    pipeline_tuner = PipelineTuner(pipeline=pipeline,
-                                   task=train_input.task,
-                                   iterations=10,
-                                   search_space=SearchSpace(custom_search_space=custom_search_space,
-                                                            replace_default_search_space=replace_default_search_space))
+    cv_folds = 3
+    search_space = PipelineSearchSpace(custom_search_space=custom_search_space,
+                                       replace_default_search_space=replace_default_search_space)
+    pipeline_tuner = TunerBuilder(train_input.task) \
+        .with_tuner(SimultaneousTuner) \
+        .with_metric(RegressionMetricsEnum.RMSE) \
+        .with_cv_folds(cv_folds) \
+        .with_iterations(10) \
+        .with_search_space(search_space).build(train_input)
     # Tuning pipeline
-    pipeline = pipeline_tuner.tune_pipeline(input_data=train_input,
-                                            loss_function=mean_squared_error,
-                                            loss_params={'squared': False},
-                                            cv_folds=3,
-                                            validation_blocks=3)
+    pipeline = pipeline_tuner.tune(pipeline)
     # Fit pipeline on the entire train data
     pipeline.fit_from_scratch(train_input)
     # Predict tuned pipeline
@@ -134,7 +142,7 @@ def run_pipeline_tuning(time_series, len_forecast, pipeline_type):
 
 
 if __name__ == '__main__':
-    df = pd.read_csv('../../../cases/data/time_series/metocean.csv')
+    df = pd.read_csv('../../real_examples/real_cases/data/time_series/metocean.csv')
     time_series = np.array(df['value'])
     run_pipeline_tuning(time_series=time_series,
                         len_forecast=50,

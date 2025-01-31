@@ -4,9 +4,9 @@ from typing import Tuple
 from sklearn.datasets import make_moons
 
 from examples.simple.classification.classification_pipelines import classification_svc_complex_pipeline
-from fedot.api.main import Fedot
+from fedot import Fedot
 from fedot.core.data.data import InputData
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
@@ -27,10 +27,10 @@ def run_one_model_with_specific_evaluation_mode(train_data, test_data, mode: str
         baseline_model = Fedot(problem=problem, preset='gpu')
     else:
         baseline_model = Fedot(problem=problem)
-    svc_node_with_custom_params = PrimaryNode('svc')
+    svc_node_with_custom_params = PipelineNode('svc')
     # the custom params are needed to make probability evaluation available
     # otherwise an error is occurred
-    svc_node_with_custom_params.custom_params = \
+    svc_node_with_custom_params.parameters = \
         dict(kernel='rbf', C=10, gamma=1, cache_size=2000, probability=True)
     preset_pipeline = Pipeline(svc_node_with_custom_params)
 
@@ -69,8 +69,8 @@ def run_pipeline_with_specific_evaluation_mode(train_data: InputData, test_data:
 
 
 def get_scoring_data() -> Tuple[InputData, InputData]:
-    train_data_path = f'{fedot_project_root()}/cases/data/scoring/scoring_train.csv'
-    test_data_path = f'{fedot_project_root()}/cases/data/scoring/scoring_test.csv'
+    train_data_path = f'{fedot_project_root()}/examples/real_cases/data/scoring/scoring_train.csv'
+    test_data_path = f'{fedot_project_root()}/examples/real_cases/data/scoring/scoring_test.csv'
 
     train_data = InputData.from_csv(train_data_path)
     test_data = InputData.from_csv(test_data_path)

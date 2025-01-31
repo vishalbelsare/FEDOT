@@ -1,10 +1,12 @@
 import warnings
 from typing import Optional
 
-from fedot.core.data.data import InputData
+from fedot.core.data.data import InputData, OutputData
 from fedot.core.operations.evaluation.evaluation_interfaces import EvaluationStrategy, SkLearnEvaluationStrategy
 from fedot.core.operations.evaluation.operation_implementations.data_operations.decompose \
     import DecomposerClassImplementation
+from fedot.core.operations.evaluation.operation_implementations.data_operations.sklearn_filters \
+    import IsolationForestClassImplementation
 from fedot.core.operations.evaluation.operation_implementations.data_operations.sklearn_imbalanced_class import \
     ResampleImplementation
 from fedot.core.operations.evaluation.operation_implementations. \
@@ -15,8 +17,8 @@ from fedot.core.operations.evaluation.operation_implementations.models. \
     keras import FedotCNNImplementation
 from fedot.core.operations.evaluation.operation_implementations.models.knn import FedotKnnClassImplementation
 from fedot.core.operations.evaluation.operation_implementations.models.svc import FedotSVCImplementation
-from fedot.core.operations.evaluation.operation_implementations.data_operations.sklearn_filters \
-    import IsolationForestClassImplementation
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.utilities.random import ImplementationRandomStateHandler
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -24,27 +26,26 @@ warnings.filterwarnings("ignore", category=UserWarning)
 class SkLearnClassificationStrategy(SkLearnEvaluationStrategy):
     """ Strategy for applying classification algorithms from Sklearn library """
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool):
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         """
-        Predict method for classification task
+        Predict method for classification task for predict stage
 
         :param trained_operation: model object
         :param predict_data: data used for prediction
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         :return: prediction target
         """
 
-        prediction = self._sklearn_compatible_prediction(trained_operation=trained_operation,
-                                                         features=predict_data.features)
+        prediction = self._sklearn_compatible_prediction(
+            trained_operation=trained_operation,
+            features=predict_data.features
+        )
 
-        # Convert prediction to output (if it is required)
         converted = self._convert_to_output(prediction, predict_data)
         return converted
 
 
 class FedotClassificationStrategy(EvaluationStrategy):
-    __operations_by_types = {
+    _operations_by_types = {
         'lda': LDAImplementation,
         'qda': QDAImplementation,
         'svc': FedotSVCImplementation,
@@ -52,7 +53,7 @@ class FedotClassificationStrategy(EvaluationStrategy):
         'knn': FedotKnnClassImplementation
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
         super().__init__(operation_type, params)
 
@@ -64,22 +65,19 @@ class FedotClassificationStrategy(EvaluationStrategy):
         """
 
         warnings.filterwarnings("ignore", category=RuntimeWarning)
-        if self.params_for_fit:
-            operation_implementation = self.operation_impl(**self.params_for_fit)
-        else:
-            operation_implementation = self.operation_impl()
 
-        operation_implementation.fit(train_data)
+        operation_implementation = self.operation_impl(self.params_for_fit)
+
+        with ImplementationRandomStateHandler(implementation=operation_implementation):
+            operation_implementation.fit(train_data)
         return operation_implementation
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool):
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         """
-        Predict method for classification task
+        Predict method for classification task for predict stage
 
         :param trained_operation: model object
         :param predict_data: data used for prediction
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
         :return: prediction target
         """
         n_classes = len(trained_operation.classes_)
@@ -88,7 +86,7 @@ class FedotClassificationStrategy(EvaluationStrategy):
         elif self.output_mode in ['probs', 'full_probs', 'default']:
             prediction = trained_operation.predict_proba(predict_data)
             if n_classes < 2:
-                raise NotImplementedError()
+                raise ValueError('Data set contain only 1 target class. Please reformat your data.')
             elif n_classes == 2 and self.output_mode != 'full_probs' and len(prediction.shape) > 1:
                 prediction = prediction[:, 1]
         else:
@@ -98,19 +96,13 @@ class FedotClassificationStrategy(EvaluationStrategy):
         converted = self._convert_to_output(prediction, predict_data)
         return converted
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain Fedot Classification Strategy for {operation_type}')
-
 
 class FedotClassificationPreprocessingStrategy(EvaluationStrategy):
     """ Strategy for applying custom algorithms from FEDOT to preprocess data
     for classification task
     """
 
-    __operations_by_types = {
+    _operations_by_types = {
         'rfe_lin_class': LinearClassFSImplementation,
         'rfe_non_lin_class': NonLinearClassFSImplementation,
         'class_decompose': DecomposerClassImplementation,
@@ -118,7 +110,7 @@ class FedotClassificationPreprocessingStrategy(EvaluationStrategy):
         'isolation_forest_class': IsolationForestClassImplementation
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         super().__init__(operation_type, params)
         self.operation_impl = self._convert_to_operation(operation_type)
 
@@ -130,33 +122,31 @@ class FedotClassificationPreprocessingStrategy(EvaluationStrategy):
         """
 
         warnings.filterwarnings("ignore", category=RuntimeWarning)
-        if self.params_for_fit:
-            operation_implementation = self.operation_impl(**self.params_for_fit)
-        else:
-            operation_implementation = self.operation_impl()
-
-        operation_implementation.fit(train_data)
+        operation_implementation = self.operation_impl(self.params_for_fit)
+        with ImplementationRandomStateHandler(implementation=operation_implementation):
+            operation_implementation.fit(train_data)
         return operation_implementation
 
-    def predict(self, trained_operation, predict_data: InputData,
-                is_fit_pipeline_stage: bool):
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         """
-        Transform data
+        Transform data for predict stage
 
         :param trained_operation: model object
         :param predict_data: data used for prediction
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
-        :return:
+        :return: prediction target
         """
-        prediction = trained_operation.transform(predict_data,
-                                                 is_fit_pipeline_stage)
-
-        # Convert prediction to output (if it is required)
+        prediction = trained_operation.transform(predict_data)
         converted = self._convert_to_output(prediction, predict_data)
         return converted
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain custom classification preprocessing strategy for {operation_type}')
+    def predict_for_fit(self, trained_operation, predict_data: InputData) -> OutputData:
+        """
+        Transform data for fit stage
+
+        :param trained_operation: model object
+        :param predict_data: data used for prediction
+        :return: prediction target
+        """
+        prediction = trained_operation.transform_for_fit(predict_data)
+        converted = self._convert_to_output(prediction, predict_data)
+        return converted

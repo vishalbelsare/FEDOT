@@ -1,27 +1,26 @@
-import os
-from random import seed
+from copy import deepcopy
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.metrics import mean_absolute_error, mean_squared_error
 from scipy import stats
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-from examples.simple.time_series_forecasting.ts_pipelines import clstm_pipeline
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.arima import \
+    ARIMAImplementation
+from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.statsmodels import \
+    AutoRegImplementation
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.pipelines.ts_wrappers import in_sample_ts_forecast, out_of_sample_ts_forecast
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
-from fedot.utilities.synth_dataset_generator import generate_synthetic_data
-from fedot.core.operations.evaluation.operation_implementations.models.ts_implementations.arima import \
-    ARIMAImplementation
 from fedot.core.utils import fedot_project_root
-
-np.random.seed(42)
-seed(42)
+from fedot.utilities.synth_dataset_generator import generate_synthetic_data
 
 
 def _max_rmse_threshold_by_std(values, is_strict=True):
@@ -29,15 +28,15 @@ def _max_rmse_threshold_by_std(values, is_strict=True):
     return np.std(values) * tolerance_coeff
 
 
-def get_ts_data(n_steps=80, forecast_length=5):
+def get_ts_data(n_steps: int = 80, forecast_length: int = 5, validation_blocks: Optional[int] = None):
     """ Prepare data from csv file with time series and take needed number of
     elements
 
     :param n_steps: number of elements in time series to take
     :param forecast_length: the length of forecast
+    :param validation_blocks: number of validation blocks
     """
-    project_root_path = str(fedot_project_root())
-    file_path = os.path.join(project_root_path, 'test/data/simple_time_series.csv')
+    file_path = fedot_project_root().joinpath('test/data/simple_time_series.csv')
     df = pd.read_csv(file_path)
 
     time_series = np.array(df['sea_height'])[:n_steps]
@@ -49,7 +48,7 @@ def get_ts_data(n_steps=80, forecast_length=5):
                      target=time_series,
                      task=task,
                      data_type=DataTypesEnum.ts)
-    return train_test_data_setup(data)
+    return train_test_data_setup(data, validation_blocks=validation_blocks)
 
 
 def get_ts_data_with_dt_idx(n_steps=80, forecast_length=5):
@@ -59,8 +58,7 @@ def get_ts_data_with_dt_idx(n_steps=80, forecast_length=5):
     :param n_steps: number of elements in time series to take
     :param forecast_length: the length of forecast
     """
-    project_root_path = str(fedot_project_root())
-    file_path = os.path.join(project_root_path, 'test/data/simple_sea_level.csv')
+    file_path = fedot_project_root().joinpath('test/data/simple_sea_level.csv')
     df = pd.read_csv(file_path)
 
     time_series = np.array(df.iloc[:n_steps, 1])
@@ -76,20 +74,20 @@ def get_ts_data_with_dt_idx(n_steps=80, forecast_length=5):
     return train_test_data_setup(data)
 
 
-def get_multiscale_pipeline():
+def get_multiscale_pipeline(window_size1: int = 20, window_size2: int = 100):
     # First branch
-    node_lagged_1 = PrimaryNode('lagged')
-    node_lagged_1.custom_params = {'window_size': 20}
-    node_ridge_1 = SecondaryNode('ridge', nodes_from=[node_lagged_1])
+    node_lagged_1 = PipelineNode('lagged')
+    node_lagged_1.parameters = {'window_size': window_size1}
+    node_ridge_1 = PipelineNode('ridge', nodes_from=[node_lagged_1])
 
     # Second branch, which will try to make prediction based on smoothed ts
-    node_filtering = PrimaryNode('gaussian_filter')
-    node_filtering.custom_params = {'sigma': 3}
-    node_lagged_2 = SecondaryNode('lagged', nodes_from=[node_filtering])
-    node_lagged_2.custom_params = {'window_size': 100}
-    node_ridge_2 = SecondaryNode('ridge', nodes_from=[node_lagged_2])
+    node_filtering = PipelineNode('gaussian_filter')
+    node_filtering.parameters = {'sigma': 3}
+    node_lagged_2 = PipelineNode('lagged', nodes_from=[node_filtering])
+    node_lagged_2.parameters = {'window_size': window_size2}
+    node_ridge_2 = PipelineNode('ridge', nodes_from=[node_lagged_2])
 
-    node_final = SecondaryNode('linear', nodes_from=[node_ridge_1, node_ridge_2])
+    node_final = PipelineNode('linear', nodes_from=[node_ridge_1, node_ridge_2])
 
     pipeline = Pipeline(node_final)
 
@@ -97,9 +95,9 @@ def get_multiscale_pipeline():
 
 
 def get_simple_ts_pipeline(model_root: str = 'ridge', window_size: int = 20):
-    node_lagged = PrimaryNode('lagged')
-    node_lagged.custom_params = {'window_size': window_size}
-    node_root = SecondaryNode(model_root, nodes_from=[node_lagged])
+    node_lagged = PipelineNode('lagged')
+    node_lagged.parameters = {'window_size': window_size}
+    node_root = PipelineNode(model_root, nodes_from=[node_lagged])
 
     pipeline = Pipeline(node_root)
 
@@ -107,20 +105,20 @@ def get_simple_ts_pipeline(model_root: str = 'ridge', window_size: int = 20):
 
 
 def get_statsmodels_pipeline():
-    node_ar = PrimaryNode('ar')
-    node_ar.custom_params = {'lag_1': 20, 'lag_2': 100}
+    node_ar = PipelineNode('ar')
+    node_ar.parameters = {'lag_1': 20, 'lag_2': 100}
     pipeline = Pipeline(node_ar)
     return pipeline
 
 
 def get_multiple_ts_pipeline():
-    node_filter_first = PrimaryNode('smoothing')
-    node_filter_first.custom_params = {'window_size': 2}
-    node_filter_second = PrimaryNode('gaussian_filter')
-    node_filter_second.custom_params = {'sigma': 2}
+    node_filter_first = PipelineNode('smoothing')
+    node_filter_first.parameters = {'window_size': 2}
+    node_filter_second = PipelineNode('gaussian_filter')
+    node_filter_second.parameters = {'sigma': 2}
 
-    node_lagged = SecondaryNode('lagged', nodes_from=[node_filter_first, node_filter_second])
-    node_ridge = SecondaryNode('ridge', nodes_from=[node_lagged])
+    node_lagged = PipelineNode('lagged', nodes_from=[node_filter_first, node_filter_second])
+    node_ridge = PipelineNode('ridge', nodes_from=[node_lagged])
     return Pipeline(node_ridge)
 
 
@@ -178,11 +176,22 @@ def test_simple_pipeline_forecast_correct():
     assert rmse_test < rmse_threshold
 
 
+def test_ar_do_correct_lags():
+    train_data, test_data = get_ts_data(n_steps=80)
+    ar = AutoRegImplementation(OperationParameters(**{'lag_1': 70, 'lag_2': 80}))
+    params = ar.get_params()
+    old_params = deepcopy(params)
+    ar.fit(train_data)
+    new_params = ar.get_params()
+    for lag in old_params.keys():
+        assert lag in new_params.changed_parameters.keys()
+        assert old_params.get(lag) != new_params.get(lag)
+
+
 def test_regression_multiscale_pipeline_forecast_correct():
     train_data, test_data = get_ts_data(forecast_length=5)
 
-    pipeline = get_multiscale_pipeline()
-
+    pipeline = get_multiscale_pipeline(2, 4)
     pipeline.fit(input_data=train_data)
     test_pred = pipeline.predict(input_data=test_data)
 
@@ -239,14 +248,14 @@ def test_ts_single_pipeline_model_without_multioutput_support():
 def test_exception_if_incorrect_forecast_length():
     with pytest.raises(ValueError) as exc:
         _, _ = get_ts_data(forecast_length=0)
-    assert str(exc.value) == f'Forecast length should be more then 0'
+    assert str(exc.value) == 'Forecast length should be more then 0'
 
 
 def test_multistep_out_of_sample_forecasting():
     horizon = 12
     train_data, test_data = get_ts_data(forecast_length=5)
 
-    pipeline = get_multiscale_pipeline()
+    pipeline = get_multiscale_pipeline(2, 5)
 
     # Fit pipeline to make forecasts 5 elements above
     pipeline.fit(input_data=train_data)
@@ -276,50 +285,11 @@ def test_multistep_in_sample_forecasting():
     assert len(predicted) == horizon
 
 
-def test_clstm_forecasting():
-    horizon = 5
-    window_size = 20
-    n_steps = 100
-    train_data, test_data = get_ts_data(n_steps=n_steps + horizon, forecast_length=horizon)
-
-    node_root = PrimaryNode("clstm")
-    node_root.custom_params = {
-        'input_size': 1,
-        'window_size': window_size,
-        'hidden_size': 100,
-        'learning_rate': 0.0004,
-        'cnn1_kernel_size': 5,
-        'cnn1_output_size': 32,
-        'cnn2_kernel_size': 4,
-        'cnn2_output_size': 32,
-        'batch_size': 64,
-        'num_epochs': 2
-    }
-
-    pipeline = Pipeline(node_root)
-    pipeline.fit(train_data)
-    predicted = pipeline.predict(test_data).predict[0]
-
-    assert len(predicted) == horizon
-
-
-def test_clstm_in_pipeline():
-    horizon = 5
-    n_steps = 100
-    train_data, test_data = get_ts_data(n_steps=n_steps + horizon, forecast_length=horizon)
-
-    pipeline = clstm_pipeline()
-    pipeline.fit(train_data)
-    predicted = pipeline.predict(test_data).predict[0]
-
-    assert len(predicted) == horizon
-
-
 def test_ts_forecasting_with_multiple_series_in_lagged():
     """ Test pipeline predict correctly when lagged operation get several time series """
     horizon = 3
     n_steps = 50
-    train_data, test_data = get_ts_data(n_steps=n_steps + horizon,  forecast_length=horizon)
+    train_data, test_data = get_ts_data(n_steps=n_steps + horizon, forecast_length=horizon)
 
     pipeline = get_multiple_ts_pipeline()
     pipeline.fit(train_data)

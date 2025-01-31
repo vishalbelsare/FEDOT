@@ -1,27 +1,23 @@
-import os
 from typing import Optional
 
 import numpy as np
-
 from h2o import h2o, H2OFrame
 from h2o.automl import H2OAutoML
 from tpot import TPOTClassifier, TPOTRegressor
 
-from fedot.core.pipelines.automl_wrappers import *
-
 from fedot.core.data.data import InputData, OutputData
 from fedot.core.operations.evaluation.evaluation_interfaces import EvaluationStrategy
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.core.pipelines.automl_wrappers import H2OSerializationWrapper, TPOTRegressionSerializationWrapper
 from fedot.core.repository.tasks import TaskTypesEnum
 
 
 class H2OAutoMLRegressionStrategy(EvaluationStrategy):
-    __operations_by_types = {
+    _operations_by_types = {
         'h2o_regr': H2OAutoML
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
-        self.name_operation = operation_type
-        self.params = params
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
         super().__init__(operation_type, params)
 
@@ -46,19 +42,19 @@ class H2OAutoMLRegressionStrategy(EvaluationStrategy):
         for name in target_names:
             train_columns.remove(name)
         for name in target_names:
-            model = H2OAutoML(max_models=self.params.get("max_models"),
-                              seed=self.params.get("seed"),
-                              max_runtime_secs=self.params.get("timeout") * 60 // target_len
+            model = H2OAutoML(max_models=self.params_for_fit.get("max_models"),
+                              seed=self.params_for_fit.get("seed"),
+                              max_runtime_secs=self.params_for_fit.get("timeout") * 60 // target_len
                               )
             model.train(x=train_columns, y=name, training_frame=train_frame)
             models.append(model.leader)
 
         return H2OSerializationWrapper(models)
 
-    def predict(self, trained_operation, predict_data: InputData, is_fit_pipeline_stage: bool) -> OutputData:
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         res = []
         for model in trained_operation.get_estimators():
-            frame = H2OFrame(predict_data.features)
+            frame = self._data_transform(predict_data)
             prediction = model.predict(frame)
             prediction = prediction.as_data_frame().to_numpy()
             res.append(np.ravel(prediction))
@@ -66,15 +62,9 @@ class H2OAutoMLRegressionStrategy(EvaluationStrategy):
         out = self._convert_to_output(res, predict_data)
         return out
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain H2O AutoML Regression Strategy for {operation_type}')
-
     def _data_transform(self, data: InputData) -> H2OFrame:
         if len(data.target.shape) == 1:
-            concat_data = np.concatenate((data.features, data.target.reshape(-1, 1)), 1)
+            concat_data = np.concatenate((data.features, data.target.reshape(1, -1)), 1)
         else:
             concat_data = np.concatenate((data.features, data.target.reshape(-1, data.target.shape[1])), 1)
         frame = H2OFrame(python_obj=concat_data)
@@ -87,13 +77,11 @@ class H2OAutoMLRegressionStrategy(EvaluationStrategy):
 
 
 class H2OAutoMLClassificationStrategy(EvaluationStrategy):
-    __operations_by_types = {
+    _operations_by_types = {
         'h2o_class': H2OAutoML
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
-        self.name_operation = operation_type
-        self.params = params
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
         self.model_class = H2OSerializationWrapper
         super().__init__(operation_type, params)
@@ -112,16 +100,16 @@ class H2OAutoMLClassificationStrategy(EvaluationStrategy):
         target_name = train_columns[-1]
         train_columns.remove(target_name)
         train_frame[target_name] = train_frame[target_name].asfactor()
-        model = self.operation_impl(max_models=self.params.get("max_models"),
-                                    seed=self.params.get("seed"),
-                                    max_runtime_secs=self.params.get("timeout")*60
+        model = self.operation_impl(max_models=self.params_for_fit.get("max_models"),
+                                    seed=self.params_for_fit.get("seed"),
+                                    max_runtime_secs=self.params_for_fit.get("timeout") * 60
                                     )
 
         model.train(x=train_columns, y=target_name, training_frame=train_frame)
         model.leader.classes_ = np.unique(train_data.target)
         return H2OSerializationWrapper([model.leader])
 
-    def predict(self, trained_operation, predict_data: InputData, is_fit_pipeline_stage: bool) -> OutputData:
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         frame = self._data_transform(predict_data)
         prediction = trained_operation.get_estimators()[0].predict(frame)
         prediction = prediction.as_data_frame().to_numpy()
@@ -135,12 +123,6 @@ class H2OAutoMLClassificationStrategy(EvaluationStrategy):
         out = self._convert_to_output(prediction, predict_data)
         return out
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain H2O AutoML Classification Strategy for {operation_type}')
-
     def _data_transform(self, data: InputData) -> H2OFrame:
         concat_data = np.concatenate((data.features, data.target.reshape(-1, 1)), 1)
         frame = H2OFrame(python_obj=concat_data)
@@ -153,13 +135,11 @@ class H2OAutoMLClassificationStrategy(EvaluationStrategy):
 
 
 class TPOTAutoMLRegressionStrategy(EvaluationStrategy):
-    __operations_by_types = {
+    _operations_by_types = {
         'tpot_regr': TPOTRegressor
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
-        self.name_operation = operation_type
-        self.params = params or {}
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
         super().__init__(operation_type, params)
 
@@ -175,18 +155,18 @@ class TPOTAutoMLRegressionStrategy(EvaluationStrategy):
             target = train_data.target
 
         for i in range(target.shape[1]):
-            model = self.operation_impl(generations=self.params.get('generations'),
-                                        population_size=self.params.get('population_size'),
+            model = self.operation_impl(generations=self.params_for_fit.get('generations'),
+                                        population_size=self.params_for_fit.get('population_size'),
                                         verbosity=2,
                                         random_state=42,
-                                        max_time_mins=self.params.get('timeout', 0.) // target_len
+                                        max_time_mins=self.params_for_fit.get('timeout', 0.) // target_len
                                         )
             model.fit(train_data.features.astype(float), target.astype(float)[:, i])
             models.append(model.fitted_pipeline_)
         model = TPOTRegressionSerializationWrapper(models)
         return model
 
-    def predict(self, trained_operation, predict_data: InputData, is_fit_pipeline_stage: bool) -> OutputData:
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         res = []
         features = predict_data.features.astype(float)
         for model in trained_operation.get_estimators():
@@ -197,54 +177,39 @@ class TPOTAutoMLRegressionStrategy(EvaluationStrategy):
         out = self._convert_to_output(res, predict_data)
         return out
 
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain H2O AutoML Regression Strategy for {operation_type}')
-
 
 class TPOTAutoMLClassificationStrategy(EvaluationStrategy):
-    __operations_by_types = {
+    _operations_by_types = {
         'tpot_class': TPOTClassifier
     }
 
-    def __init__(self, operation_type: str, params: Optional[dict] = None):
-        self.name_operation = operation_type
-        self.params = params
+    def __init__(self, operation_type: str, params: Optional[OperationParameters] = None):
         self.operation_impl = self._convert_to_operation(operation_type)
         super().__init__(operation_type, params)
 
     def fit(self, train_data: InputData):
-        model = self.operation_impl(generations=self.params.get('generations'),
-                                    population_size=self.params.get('population_size'),
+        model = self.operation_impl(generations=self.params_for_fit.get('generations'),
+                                    population_size=self.params_for_fit.get('population_size'),
                                     verbosity=2,
                                     random_state=42,
-                                    max_time_mins=self.params.get('timeout', 0.)
+                                    max_time_mins=self.params_for_fit.get('timeout', 0.)
                                     )
-        model.classes_ = np.unique(train_data.target)
 
         model.fit(train_data.features.astype(float), train_data.target.astype(int))
 
         return model.fitted_pipeline_
 
-    def predict(self, trained_operation, predict_data: InputData, is_fit_pipeline_stage: bool) -> OutputData:
+    def predict(self, trained_operation, predict_data: InputData) -> OutputData:
         n_classes = len(trained_operation.classes_)
         if self.output_mode == 'labels':
             prediction = trained_operation.predict(predict_data.features.astype(float))
         elif self.output_mode in ['probs', 'full_probs', 'default']:
             prediction = trained_operation.predict_proba(predict_data.features.astype(float))
             if n_classes < 2:
-                raise NotImplementedError()
+                raise ValueError('Data set contain only 1 target class. Please reformat your data.')
             elif n_classes == 2 and self.output_mode != 'full_probs' and len(prediction.shape) > 1:
                 prediction = prediction[:, 1]
         else:
             raise ValueError(f'Output model {self.output_mode} is not supported')
         out = self._convert_to_output(prediction, predict_data)
         return out
-
-    def _convert_to_operation(self, operation_type: str):
-        if operation_type in self.__operations_by_types.keys():
-            return self.__operations_by_types[operation_type]
-        else:
-            raise ValueError(f'Impossible to obtain H2O AutoML Classification Strategy for {operation_type}')

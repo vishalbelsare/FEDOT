@@ -1,42 +1,27 @@
-import os
-import random
-from datetime import timedelta
-
 import numpy as np
+from golem.core.tuning.simultaneous import SimultaneousTuner
 from sklearn.metrics import mean_squared_error
 
-from cases.credit_scoring.credit_scoring_problem import run_credit_scoring_problem
-from cases.metocean_forecasting_problem import run_metocean_forecasting_problem
-from cases.multi_modal_genre_prediction import run_multi_modal_case
-from cases.river_levels_prediction.river_level_case_manual import run_river_experiment
-from cases.spam_detection import run_text_problem_from_saved_meta_file
-from cases.time_series_gapfilling_case import run_gapfilling_case
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from examples.real_cases.credit_scoring.credit_scoring_problem import run_credit_scoring_problem
+from examples.real_cases.metocean_forecasting_problem import run_metocean_forecasting_problem
+from examples.real_cases.river_levels_prediction.river_level_case_manual import run_river_experiment
+from examples.real_cases.spam_detection import run_text_problem_from_saved_meta_file
+from examples.real_cases.time_series_gapfilling_case import run_gapfilling_case
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.tuning.unified import PipelineTuner
 from fedot.core.utils import fedot_project_root
-
-random.seed(1)
-np.random.seed(1)
 
 
 def test_credit_scoring_problem():
-    project_root_path = str(fedot_project_root())
-    file_path_train = os.path.join(project_root_path, 'test/data/simple_classification.csv')
-    file_path_test = file_path_train
-    full_path_train = os.path.join(str(fedot_project_root()), file_path_train)
-    full_path_test = os.path.join(str(fedot_project_root()), file_path_test)
+    full_path_train = full_path_test = fedot_project_root().joinpath('test/data/simple_classification.csv')
 
-    roc_auc_test = run_credit_scoring_problem(full_path_train, full_path_test, timeout=0.1, target='Y')
+    roc_auc_test = run_credit_scoring_problem(full_path_train, full_path_test, timeout=5, target='Y', n_jobs=1)
     assert roc_auc_test > 0.5
 
 
 def test_metocean_forecasting_problem():
-    project_root_path = str(fedot_project_root())
-    file_path_train = os.path.join(project_root_path, 'test/data/simple_time_series.csv')
-    file_path_test = file_path_train
-    full_path_train = os.path.join(str(fedot_project_root()), file_path_train)
-    full_path_test = os.path.join(str(fedot_project_root()), file_path_test)
+    full_path_train = fedot_project_root().joinpath('test/data/simple_time_series.csv')
+    full_path_test = full_path_train
 
     rmse = run_metocean_forecasting_problem(full_path_train,
                                             full_path_test,
@@ -66,21 +51,20 @@ def test_gapfilling_problem():
 
 def test_river_levels_problem():
     # Initialise pipeline for river levels prediction
-    node_encoder = PrimaryNode('one_hot_encoding')
-    node_scaling = SecondaryNode('scaling', nodes_from=[node_encoder])
-    node_ridge = SecondaryNode('ridge', nodes_from=[node_scaling])
-    node_lasso = SecondaryNode('lasso', nodes_from=[node_scaling])
-    node_final = SecondaryNode('rfr', nodes_from=[node_ridge, node_lasso])
+    node_encoder = PipelineNode('one_hot_encoding')
+    node_scaling = PipelineNode('scaling', nodes_from=[node_encoder])
+    node_ridge = PipelineNode('ridge', nodes_from=[node_scaling])
+    node_lasso = PipelineNode('lasso', nodes_from=[node_scaling])
+    node_final = PipelineNode('rfr', nodes_from=[node_ridge, node_lasso])
 
     init_pipeline = Pipeline(node_final)
 
-    project_root_path = str(fedot_project_root())
-    file_path_train = os.path.join(project_root_path, 'test/data/station_levels.csv')
+    file_path_train = fedot_project_root().joinpath('test/data/station_levels.csv')
 
     run_river_experiment(file_path=file_path_train,
                          pipeline=init_pipeline,
                          iterations=1,
-                         tuner=PipelineTuner,
+                         tuner=SimultaneousTuner,
                          tuner_iterations=10)
 
     is_experiment_finished = True
@@ -90,14 +74,7 @@ def test_river_levels_problem():
 
 def test_spam_detection_problem():
     """ Simple launch of spam detection case """
-    project_root_path = str(fedot_project_root())
-    file_path_train = os.path.join(project_root_path, 'test/data/spam_detection.csv')
+    file_path_train = fedot_project_root().joinpath('test/data/spam_detection.csv')
 
     # Classification task based on text data
     run_text_problem_from_saved_meta_file(file_path_train)
-
-
-def test_multi_modal_case():
-    """ Simple launch of  multi modal case """
-    # Classification task based on text data
-    run_multi_modal_case('cases/data/mm_imdb', is_visualise=True, timeout=timedelta(seconds=1))

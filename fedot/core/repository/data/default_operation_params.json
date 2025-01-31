@@ -6,39 +6,67 @@
     "n_jobs": 1
   },
   "xgboost": {
-    "eval_metric": "mlogloss",
-    "nthread": -1
+    "n_jobs": 1,
+    "verbosity": 0,
+    "booster": "gbtree",
+    "tree_method": "auto",
+    "enable_categorical": true,
+    "use_eval_set": true,
+    "early_stopping_rounds": 30
+  },
+  "xgboostreg": {
+    "n_jobs": 1,
+    "verbosity": 0,
+    "booster": "gbtree",
+    "tree_method": "auto",
+    "enable_categorical": true,
+    "use_eval_set": true,
+    "early_stopping_rounds": 30
   },
   "catboost": {
     "allow_writing_files": false,
-    "verbose": false
+    "verbose": false,
+    "iterations": 1000,
+    "enable_categorical": true,
+    "use_eval_set": true,
+    "use_best_model": true,
+    "early_stopping_rounds": 30,
+    "n_jobs": 1
   },
   "catboostreg": {
     "allow_writing_files": false,
-    "verbose": false
+    "verbose": false,
+    "iterations": 1000,
+    "enable_categorical": true,
+    "use_eval_set": true,
+    "use_best_model": true,
+    "early_stopping_rounds": 30,
+    "n_jobs": 1
   },
   "lgbm": {
-    "num_leaves": 32,
-    "colsample_bytree": 0.8,
-    "subsample": 0.8,
-    "subsample_freq": 10,
-    "learning_rate": 0.03,
-    "n_estimators": 100,
-    "verbose": -1,
-    "num_threads": 1
+    "boosting_type": "gbdt",
+    "max_depth": -1,
+    "bagging_fraction": 0.85,
+    "extra_trees": false,
+    "enable_categorical": true,
+    "use_eval_set": true,
+    "early_stopping_rounds": 30,
+    "n_jobs": 1,
+    "verbose": -1
   },
   "lgbmreg": {
-    "num_leaves": 32,
-    "colsample_bytree": 0.8,
-    "subsample": 0.8,
-    "subsample_freq": 10,
-    "learning_rate": 0.03,
-    "n_estimators": 100,
-    "verbose": -1,
-    "num_threads": 1
+    "boosting_type": "gbdt",
+    "max_depth": -1,
+    "bagging_fraction": 0.85,
+    "extra_trees": false,
+    "enable_categorical": true,
+    "use_eval_set": true,
+    "early_stopping_rounds": 30,
+    "n_jobs": 1,
+    "verbose": -1
   },
   "lagged": {
-    "window_size": 10
+    "window_size": 0
   },
   "diff_filter": {
     "window_size": 3,
@@ -49,7 +77,7 @@
     "cut_part": 0.5
   },
   "sparse_lagged": {
-    "window_size": 10,
+    "window_size": 0,
     "n_components": 0.5,
     "sparse_transform": true,
     "use_svd": false
@@ -89,18 +117,16 @@
     "max_trials": 100,
     "max_skips": 1000
   },
-  "clstm": {
-    "window_size": 24,
+  "cgru": {
     "hidden_size": 200,
     "learning_rate": 0.001,
     "cnn1_kernel_size": 5,
-    "cnn1_output_size": 16,
-    "cnn2_kernel_size": 3,
-    "cnn2_output_size": 32,
+    "cnn1_output_size": 32,
+    "cnn2_kernel_size": 5,
+    "cnn2_output_size": 64,
     "batch_size": 64,
-    "num_epochs": 10,
-    "teacher_forcing": 0.8,
-    "optimizer": "adam",
+    "num_epochs": 50,
+    "optimizer": "adamw",
     "loss": "mse"
   },
   "h2o_regr": {
@@ -125,11 +151,34 @@
   },
   "resample": {
     "balance": "expand_minority",
-    "replace": true,
-    "n_samples": 0.5
+    "replace": false,
+    "balance_ratio": 1
   },
   "pca": {
     "svd_solver": "full",
-    "n_components": "mle"
+    "n_components": 0.7
+  },
+  "ts_naive_average": {
+    "part_for_averaging": 1.0
+  },
+  "locf": {
+    "part_for_repeat": -1
+  },
+  "word2vec_pretrained": {
+    "model_name": "glove-twitter-25"
+  },
+  "tfidf": {
+    "min_df": 0.1,
+    "max_df": 0.9
+  },
+  "fast_ica": {
+    "whiten": "unit-variance"
+  },
+  "topological_features": {
+    "n_jobs": 1,
+    "window_size_as_share": 0.66,
+    "max_homology_dimension": 1,
+    "metric": "euclidean",
+    "stride": 1
   }
 }

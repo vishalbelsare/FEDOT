@@ -3,7 +3,7 @@ import numpy as np
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
 from fedot.core.data.supplementary_data import SupplementaryData
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import TaskTypesEnum, Task
@@ -11,7 +11,7 @@ from fedot.preprocessing.categorical import BinaryCategoricalPreprocessor
 from fedot.preprocessing.data_types import TableTypesCorrector
 from fedot.preprocessing.structure import DEFAULT_SOURCE_NAME
 from test.unit.data_operations.test_data_operations_implementations import get_mixed_data
-from test.unit.preprocessing.test_preprocessing_though_api import data_with_only_categorical_features, \
+from test.unit.preprocessing.test_preprocessing_through_api import data_with_only_categorical_features, \
     data_with_too_much_nans, data_with_spaces_and_nans_in_features, data_with_nans_in_target_column, \
     data_with_nans_in_multi_target, data_with_categorical_target
 
@@ -32,7 +32,7 @@ def data_with_mixed_types_in_each_column(multi_output: bool = False):
                          [np.nan, 8, 'a', 1, 1],
                          [np.nan, np.nan, np.nan, np.nan, np.nan],
                          [np.nan, '4', 'b', 0, 0],
-                         [np.nan, '5', 'c', -1, -1]], dtype=object)
+                         [np.nan, '5', 1, -1, -1]], dtype=object)
     if multi_output:
         # Multi-label classification problem solved
         target = np.array([['label_1', 2],
@@ -46,29 +46,24 @@ def data_with_mixed_types_in_each_column(multi_output: bool = False):
                            [0, '9']], dtype=object)
     else:
         target = np.array(['label_1', 'label_1', 'label_0', 'label_0', 'label_0', 1, 0, 1, 0], dtype=object)
-    input_data = InputData(idx=[0, 1, 2, 3, 4, 5, 6, 7, 8], features=features,
+    input_data = InputData(idx=np.arange(9), features=features,
                            target=target, task=task, data_type=DataTypesEnum.table,
-                           supplementary_data=SupplementaryData(was_preprocessed=False))
+                           supplementary_data=SupplementaryData())
     return input_data
 
 
-def correct_preprocessing_params(pipeline, numerical_min_uniques: int = None,
-                                 categorical_max_classes_th: int = None):
+def correct_preprocessing_params(pipeline, categorical_max_uniques_th: int = None):
     """
     Correct preprocessing classes parameters
 
     :param pipeline: pipeline without initialized preprocessors
-    :param numerical_min_uniques: if number of unique values in the column lower, than
+    :param categorical_max_uniques_th: if number of unique values in the column lower, than
     threshold - convert column into categorical feature
-    :param categorical_max_classes_th: if categorical column contains too much unique values
-    convert it into numerical
     """
     table_corrector = TableTypesCorrector()
 
-    if numerical_min_uniques is not None:
-        table_corrector.numerical_min_uniques = numerical_min_uniques
-    if categorical_max_classes_th is not None:
-        table_corrector.categorical_max_classes_th = categorical_max_classes_th
+    if categorical_max_uniques_th is not None:
+        table_corrector.categorical_max_uniques_th = categorical_max_uniques_th
     pipeline.preprocessor.types_correctors.update({DEFAULT_SOURCE_NAME: table_corrector})
     pipeline.preprocessor.binary_categorical_processors.update({DEFAULT_SOURCE_NAME: BinaryCategoricalPreprocessor()})
 
@@ -80,7 +75,7 @@ def test_only_categorical_data_process_correctly():
     Check if data with only categorical features processed correctly
     Source 3-feature categorical dataset must be transformed into 5-feature
     """
-    pipeline = Pipeline(PrimaryNode('ridge'))
+    pipeline = Pipeline(PipelineNode('ridge'))
     categorical_data = data_with_only_categorical_features()
 
     pipeline.fit(categorical_data)
@@ -92,11 +87,11 @@ def test_only_categorical_data_process_correctly():
 
 def test_nans_columns_process_correctly():
     """ Check if data with nans processed correctly. Columns with nans should be ignored """
-    pipeline = Pipeline(PrimaryNode('ridge'))
+    pipeline = Pipeline(PipelineNode('ridge'))
     data_with_nans = data_with_too_much_nans()
 
-    pipeline = correct_preprocessing_params(pipeline, numerical_min_uniques=5)
-    pipeline.fit(data_with_nans, use_fitted=True)
+    pipeline = correct_preprocessing_params(pipeline, categorical_max_uniques_th=5)
+    pipeline.fit(data_with_nans)
 
     # Ridge should use only one feature to make prediction
     fitted_ridge = pipeline.nodes[0]
@@ -110,7 +105,7 @@ def test_spaces_columns_process_correctly():
     """ Train simple pipeline on the dataset with spaces in categorical features.
     For example, ' x ' instead of 'x'.
     """
-    pipeline = Pipeline(PrimaryNode('ridge'))
+    pipeline = Pipeline(PipelineNode('ridge'))
     data_with_spaces = data_with_spaces_and_nans_in_features()
 
     pipeline.fit(data_with_spaces)
@@ -128,20 +123,19 @@ def test_data_with_nans_in_target_process_correctly():
     The same test for multi target table.
     """
 
-    knn_node = PrimaryNode('knnreg')
-    knn_node.custom_params = {'n_neighbors': 10}
+    knn_node = PipelineNode('knnreg')
+    knn_node.parameters = {'n_neighbors': 10}
     pipeline = Pipeline(knn_node)
 
     # Single target column processing
     single_target_data = data_with_nans_in_target_column()
     pipeline.fit(single_target_data)
-    single_hyperparams = pipeline.nodes[0].custom_params
-
+    single_hyperparams = pipeline.nodes[0].parameters
     # Multi-target columns processing
     multi_target_data = data_with_nans_in_multi_target()
+    pipeline.unfit()
     pipeline.fit(multi_target_data)
-    multi_hyperparams = pipeline.nodes[0].custom_params
-
+    multi_hyperparams = pipeline.nodes[0].parameters
     assert 2 == single_hyperparams['n_neighbors']
     assert 2 == multi_hyperparams['n_neighbors']
 
@@ -155,7 +149,7 @@ def test_preprocessing_binary_categorical_train_test_correct():
     be binary (a + b, or a + c, etc.), but a new category (a or c pr b) will appear in the test.
     So it is needed to extend dictionary for Label encoder.
     """
-    pipeline = Pipeline(PrimaryNode('ridge'))
+    pipeline = Pipeline(PipelineNode('ridge'))
     categorical_data = data_with_only_categorical_features()
     train_data, test_data = train_test_data_setup(categorical_data)
 
@@ -170,20 +164,20 @@ def test_pipeline_with_imputer():
     Pipeline has only imputation operation in it's structure. So encoding must be performed
     as preprocessing.
     """
-    imputation_node = PrimaryNode('simple_imputation')
-    final_node = SecondaryNode('ridge', nodes_from=[imputation_node])
+    imputation_node = PipelineNode('simple_imputation')
+    final_node = PipelineNode('ridge', nodes_from=[imputation_node])
     pipeline = Pipeline(final_node)
 
-    pipeline = correct_preprocessing_params(pipeline, numerical_min_uniques=5)
+    pipeline = correct_preprocessing_params(pipeline, categorical_max_uniques_th=5)
 
     mixed_input = get_mixed_data(task=Task(TaskTypesEnum.regression),
                                  extended=True)
-    pipeline.fit(mixed_input, use_fitted=True)
+    pipeline.fit(mixed_input)
 
     # Coefficients for ridge regression
     coefficients = pipeline.nodes[0].operation.fitted_operation.coef_
-    # Linear must use 17 features - several of them are encoded ones
-    assert 17 == coefficients.shape[1]
+    # Linear must use 12 features - several of them are encoded ones
+    assert coefficients.shape[1] == 12
 
 
 def test_pipeline_with_encoder():
@@ -192,16 +186,16 @@ def test_pipeline_with_encoder():
     Pipeline has only encoding operation in it's structure. So imputation must be performed
     as preprocessing.
     """
-    encoding_node = PrimaryNode('one_hot_encoding')
-    final_node = SecondaryNode('knnreg', nodes_from=[encoding_node])
-    final_node.custom_params = {'n_neighbors': 20}
+    encoding_node = PipelineNode('one_hot_encoding')
+    final_node = PipelineNode('knnreg', nodes_from=[encoding_node])
+    final_node.parameters = {'n_neighbors': 20}
     pipeline = Pipeline(final_node)
 
     mixed_input = get_mixed_data(task=Task(TaskTypesEnum.regression),
                                  extended=True)
     # Train pipeline with knn model and then check
     pipeline.fit(mixed_input)
-    knn_params = pipeline.nodes[0].custom_params
+    knn_params = pipeline.nodes[0].parameters
 
     # The number of neighbors must be equal to half of the objects in the table.
     # This means that the row with nan has been adequately processed
@@ -216,7 +210,7 @@ def test_pipeline_target_encoding_correct():
     """
     classification_data = data_with_categorical_target(with_nan=True)
 
-    pipeline = Pipeline(PrimaryNode('dt'))
+    pipeline = Pipeline(PipelineNode('dt'))
     pipeline.fit(classification_data)
     predicted = pipeline.predict(classification_data, output_mode='labels')
     predicted_labels = predicted.predict
@@ -232,7 +226,7 @@ def test_pipeline_target_encoding_for_probs():
     """
     classification_data = data_with_categorical_target(with_nan=False)
 
-    pipeline = Pipeline(PrimaryNode('dt'))
+    pipeline = Pipeline(PipelineNode('dt'))
     pipeline.fit(classification_data)
     predicted = pipeline.predict(classification_data, output_mode='probs')
     predicted_probs = predicted.predict
@@ -253,16 +247,16 @@ def test_data_with_mixed_types_per_column_processed_correctly():
     processed correctly.
     """
     input_data = data_with_mixed_types_in_each_column()
-    train_data, test_data = train_test_data_setup(input_data, split_ratio=0.9)
+    train_data, test_data = train_test_data_setup(input_data, split_ratio=0.9, stratify=False)
 
-    pipeline = Pipeline(PrimaryNode('dt'))
-    pipeline = correct_preprocessing_params(pipeline, numerical_min_uniques=5)
-    pipeline.fit(train_data, use_fitted=True)
+    pipeline = Pipeline(PipelineNode('dt'))
+    pipeline = correct_preprocessing_params(pipeline, categorical_max_uniques_th=5)
+    pipeline.fit(train_data)
     predicted = pipeline.predict(test_data)
 
     importances = pipeline.nodes[0].operation.fitted_operation.feature_importances_
 
     # Finally, seven features were used to give a forecast
-    assert len(importances) == 6
+    assert len(importances) == 7
     # Target must contain 4 labels
     assert predicted.predict.shape[-1] == 4

@@ -1,4 +1,5 @@
-from .objective import Objective, ObjectiveFunction
-from .objective_eval import ObjectiveEvaluate
 from .data_objective_eval import PipelineObjectiveEvaluate, DataSource
-from .data_objective_builder import DataObjectiveBuilder
+from .metrics_objective import MetricsObjective
+from .objective_serialization import init_backward_serialize_compat
+
+init_backward_serialize_compat()

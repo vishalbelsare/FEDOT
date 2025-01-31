@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.utilities.synth_dataset_generator import generate_synthetic_data
 from fedot.utilities.ts_gapfilling import ModelGapFiller, SimpleGapFiller
 
@@ -51,11 +51,11 @@ def get_array_with_gaps(gap_dict=None, gap_value: float = -100.0):
     :return real_values: an array with actual values in gaps
     """
 
-    real_values = generate_synthetic_data()
+    real_values = generate_synthetic_data(length=100)
 
     if gap_dict is None:
-        gap_dict = {850: 100,
-                    1400: 150}
+        gap_dict = {20: 5,
+                    70: 10}
     array_with_gaps = generate_gaps_in_ts(array_without_gaps=real_values,
                                           gap_dict=gap_dict,
                                           gap_value=gap_value)
@@ -77,9 +77,9 @@ def run_gapfilling_example():
     gap_data, real_data = get_array_with_gaps()
 
     # Filling in gaps using pipeline from FEDOT
-    node_lagged = PrimaryNode('lagged')
-    node_lagged.custom_params = {'window_size': 100}
-    node_ridge = SecondaryNode('ridge', nodes_from=[node_lagged])
+    node_lagged = PipelineNode('lagged')
+    node_lagged.parameters = {'window_size': 50}
+    node_ridge = PipelineNode('ridge', nodes_from=[node_lagged])
     ridge_pipeline = Pipeline(node_ridge)
     ridge_gapfiller = ModelGapFiller(gap_value=-100.0,
                                      pipeline=ridge_pipeline)
@@ -125,7 +125,7 @@ def plot_results(arrays_dict, gap_data):
     plt.plot(arrays_dict.get('ridge'), c='red',
              alpha=0.5, label='Inverse ridge')
     plt.plot(masked_array, c='blue', alpha=1.0, label='Actual values')
-    plt.xlim(gap_ids[0] - 100, gap_ids[-1] + 100)
+    plt.xlim(gap_ids[0] - 10, gap_ids[-1] + 10)
     plt.legend(loc='upper center')
     plt.grid()
     plt.show()

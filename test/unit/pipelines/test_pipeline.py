@@ -1,33 +1,28 @@
 import datetime
 import os
 import platform
-import random
 import time
 from copy import deepcopy
 from multiprocessing import set_start_method
-from random import seed
 
 import numpy as np
-import pandas as pd
 import pytest
 from sklearn.datasets import load_iris
-from sklearn.metrics import roc_auc_score as roc
 
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.dataset_types import DataTypesEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum, TsForecastingParams
 from fedot.core.utils import probs_to_labels
 from fedot.preprocessing.preprocessing import DataPreprocessor
+from test.integration.composer.test_composer import to_categorical_codes
+from test.integration.models.test_model import classification_dataset_with_redundant_features
 from test.unit.dag.test_graph_operator import get_pipeline
-from test.unit.models.test_model import classification_dataset_with_redundant_features
 from test.unit.pipelines.test_pipeline_comparison import pipeline_first
 from test.unit.tasks.test_forecasting import get_ts_data
 
-seed(1)
-np.random.seed(1)
 
 @pytest.fixture()
 def data_setup():
@@ -55,13 +50,8 @@ def file_data_setup():
     file = '../../data/simple_classification.csv'
     input_data = InputData.from_csv(
         os.path.join(test_file_path, file))
-    input_data.idx = _to_numerical(categorical_ids=input_data.idx)
+    input_data.idx = to_categorical_codes(categorical_ids=input_data.idx)
     return input_data
-
-
-def _to_numerical(categorical_ids: np.ndarray):
-    encoded = pd.factorize(categorical_ids)[0]
-    return encoded
 
 
 @pytest.mark.parametrize('data_fixture', ['data_setup', 'file_data_setup'])
@@ -69,19 +59,19 @@ def test_nodes_sequence_fit_correct(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
     train, _ = train_test_data_setup(data)
 
-    first = PrimaryNode(operation_type='logit')
-    second = SecondaryNode(operation_type='lda', nodes_from=[first])
-    third = SecondaryNode(operation_type='qda', nodes_from=[first])
-    final = SecondaryNode(operation_type='knn', nodes_from=[second, third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda', nodes_from=[first])
+    third = PipelineNode(operation_type='qda', nodes_from=[first])
+    final = PipelineNode(operation_type='knn', nodes_from=[second, third])
 
     train_predicted = final.fit(input_data=train)
 
     assert final.descriptive_id == (
-        '((/n_logit_default_params;)/'
-        'n_lda_default_params;;(/'
-        'n_logit_default_params;)/'
-        'n_qda_default_params;)/'
-        'n_knn_default_params')
+        '((/n_logit;)/'
+        'n_lda;;(/'
+        'n_logit;)/'
+        'n_qda;)/'
+        'n_knn')
 
     assert train_predicted.predict.shape[0] == train.target.shape[0]
     assert final.fitted_operation is not None
@@ -91,10 +81,10 @@ def test_pipeline_hierarchy_fit_correct(data_setup):
     data = data_setup
     train, _ = train_test_data_setup(data)
 
-    first = PrimaryNode(operation_type='logit')
-    second = SecondaryNode(operation_type='logit', nodes_from=[first])
-    third = SecondaryNode(operation_type='logit', nodes_from=[first])
-    final = SecondaryNode(operation_type='logit', nodes_from=[second, third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='logit', nodes_from=[first])
+    third = PipelineNode(operation_type='logit', nodes_from=[first])
+    final = PipelineNode(operation_type='logit', nodes_from=[second, third])
 
     pipeline = Pipeline()
     for node in [first, second, third, final]:
@@ -104,11 +94,11 @@ def test_pipeline_hierarchy_fit_correct(data_setup):
     train_predicted = pipeline.fit(input_data=train)
 
     assert pipeline.root_node.descriptive_id == (
-        '((/n_logit_default_params;)/'
-        'n_logit_default_params;;(/'
-        'n_logit_default_params;)/'
-        'n_logit_default_params;)/'
-        'n_logit_default_params')
+        '((/n_logit;)/'
+        'n_logit;;(/'
+        'n_logit;)/'
+        'n_logit;)/'
+        'n_logit')
 
     assert pipeline.length == 4
     assert pipeline.depth == 3
@@ -120,22 +110,22 @@ def test_pipeline_sequential_fit_correct(data_setup):
     data = data_setup
     train, _ = train_test_data_setup(data)
 
-    first = PrimaryNode(operation_type='logit')
-    second = SecondaryNode(operation_type='logit', nodes_from=[first])
-    third = SecondaryNode(operation_type='logit', nodes_from=[second])
-    final = SecondaryNode(operation_type='logit', nodes_from=[third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='logit', nodes_from=[first])
+    third = PipelineNode(operation_type='logit', nodes_from=[second])
+    final = PipelineNode(operation_type='logit', nodes_from=[third])
 
     pipeline = Pipeline()
     for node in [first, second, third, final]:
         pipeline.add_node(node)
 
-    train_predicted = pipeline.fit(input_data=train, use_fitted=False)
+    train_predicted = pipeline.fit(input_data=train)
 
     assert pipeline.root_node.descriptive_id == (
-        '(((/n_logit_default_params;)/'
-        'n_logit_default_params;)/'
-        'n_logit_default_params;)/'
-        'n_logit_default_params')
+        '(((/n_logit;)/'
+        'n_logit;)/'
+        'n_logit;)/'
+        'n_logit')
 
     assert pipeline.length == 4
     assert pipeline.depth == 4
@@ -149,9 +139,9 @@ def test_pipeline_with_datamodel_fit_correct(data_setup):
 
     pipeline = Pipeline()
 
-    node_data = PrimaryNode('logit')
-    node_first = PrimaryNode('bernb')
-    node_second = SecondaryNode('rf')
+    node_data = PipelineNode('logit')
+    node_first = PipelineNode('bernb')
+    node_second = PipelineNode('rf')
 
     node_second.nodes_from = [node_first, node_data]
 
@@ -168,18 +158,16 @@ def test_pipeline_with_datamodel_fit_correct(data_setup):
 
 
 def test_secondary_nodes_is_invariant_to_inputs_order(data_setup):
-    random.seed(1)
-    np.random.seed(1)
     data = data_setup
     # Preprocess data - determine features columns
     data = DataPreprocessor().obligatory_prepare_for_fit(data)
     train, test = train_test_data_setup(data)
 
-    first = PrimaryNode(operation_type='logit')
-    second = PrimaryNode(operation_type='lda')
-    third = PrimaryNode(operation_type='knn')
-    final = SecondaryNode(operation_type='logit',
-                          nodes_from=[first, second, third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda')
+    third = PipelineNode(operation_type='knn')
+    final = PipelineNode(operation_type='logit',
+                         nodes_from=[first, second, third])
 
     pipeline = Pipeline()
     for node in [first, second, third, final]:
@@ -189,8 +177,8 @@ def test_secondary_nodes_is_invariant_to_inputs_order(data_setup):
     second = deepcopy(second)
     third = deepcopy(third)
 
-    final_shuffled = SecondaryNode(operation_type='logit',
-                                   nodes_from=[third, first, second])
+    final_shuffled = PipelineNode(operation_type='logit',
+                                  nodes_from=[third, first, second])
 
     pipeline_shuffled = Pipeline()
     # change order of nodes in list
@@ -228,14 +216,14 @@ def test_pipeline_with_custom_params_for_model(data_setup):
                          weights='uniform',
                          p=1)
 
-    first = PrimaryNode(operation_type='logit')
-    second = PrimaryNode(operation_type='lda')
-    final = SecondaryNode(operation_type='knn', nodes_from=[first, second])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda')
+    final = PipelineNode(operation_type='knn', nodes_from=[first, second])
 
     pipeline = Pipeline(final)
     pipeline_default_params = deepcopy(pipeline)
 
-    pipeline.root_node.custom_params = custom_params
+    pipeline.root_node.parameters = custom_params
 
     pipeline_default_params.fit(data)
     pipeline.fit(data)
@@ -247,7 +235,7 @@ def test_pipeline_with_custom_params_for_model(data_setup):
 
 
 def test_pipeline_with_wrong_data():
-    pipeline = Pipeline(PrimaryNode('linear'))
+    pipeline = Pipeline(PipelineNode('linear'))
     data_seq = np.arange(0, 10)
     task = Task(TaskTypesEnum.ts_forecasting,
                 TsForecastingParams(forecast_length=10))
@@ -261,11 +249,11 @@ def test_pipeline_with_wrong_data():
 
 def test_pipeline_str():
     # given
-    first = PrimaryNode(operation_type='logit')
-    second = PrimaryNode(operation_type='lda')
-    third = PrimaryNode(operation_type='knn')
-    final = SecondaryNode(operation_type='rf',
-                          nodes_from=[first, second, third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda')
+    third = PipelineNode(operation_type='knn')
+    final = PipelineNode(operation_type='rf',
+                         nodes_from=[first, second, third])
     pipeline = Pipeline()
     pipeline.add_node(final)
 
@@ -279,11 +267,11 @@ def test_pipeline_str():
 
 
 def test_pipeline_repr():
-    first = PrimaryNode(operation_type='logit')
-    second = PrimaryNode(operation_type='lda')
-    third = PrimaryNode(operation_type='knn')
-    final = SecondaryNode(operation_type='rf',
-                          nodes_from=[first, second, third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda')
+    third = PipelineNode(operation_type='knn')
+    final = PipelineNode(operation_type='rf',
+                         nodes_from=[first, second, third])
     pipeline = Pipeline()
     pipeline.add_node(final)
 
@@ -293,13 +281,13 @@ def test_pipeline_repr():
 
 
 def test_update_node_in_pipeline_correct():
-    first = PrimaryNode(operation_type='logit')
-    final = SecondaryNode(operation_type='rf', nodes_from=[first])
+    first = PipelineNode(operation_type='logit')
+    final = PipelineNode(operation_type='rf', nodes_from=[first])
 
     pipeline = Pipeline()
     pipeline.add_node(final)
-    new_node = PrimaryNode('svc')
-    replacing_node = SecondaryNode('logit', nodes_from=[new_node])
+    new_node = PipelineNode('svc')
+    replacing_node = PipelineNode('logit', nodes_from=[new_node])
 
     pipeline.update_node(old_node=first, new_node=replacing_node)
 
@@ -309,27 +297,27 @@ def test_update_node_in_pipeline_correct():
 
 
 def test_delete_node_with_redirection():
-    first = PrimaryNode(operation_type='logit')
-    second = PrimaryNode(operation_type='lda')
-    third = SecondaryNode(operation_type='knn', nodes_from=[first, second])
-    final = SecondaryNode(operation_type='rf',
-                          nodes_from=[third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda')
+    third = PipelineNode(operation_type='knn', nodes_from=[first, second])
+    final = PipelineNode(operation_type='rf',
+                         nodes_from=[third])
     pipeline = Pipeline()
     pipeline.add_node(final)
 
     pipeline.delete_node(third)
 
-    assert len(pipeline.nodes) == 3
+    assert pipeline.length == 3
     assert first in pipeline.root_node.nodes_from
 
 
 def test_delete_primary_node():
     # given
-    first = PrimaryNode(operation_type='logit')
-    second = PrimaryNode(operation_type='lda')
-    third = SecondaryNode(operation_type='knn', nodes_from=[first])
-    final = SecondaryNode(operation_type='rf',
-                          nodes_from=[second, third])
+    first = PipelineNode(operation_type='logit')
+    second = PipelineNode(operation_type='lda')
+    third = PipelineNode(operation_type='knn', nodes_from=[first])
+    final = PipelineNode(operation_type='rf',
+                         nodes_from=[second, third])
     pipeline = Pipeline(final)
 
     # when
@@ -338,15 +326,16 @@ def test_delete_primary_node():
     new_primary_node = [node for node in pipeline.nodes if node.operation.operation_type == 'knn'][0]
 
     # then
-    assert len(pipeline.nodes) == 3
-    assert isinstance(new_primary_node, PrimaryNode)
+    assert pipeline.length == 3
+    assert isinstance(new_primary_node, PipelineNode)
+    assert new_primary_node.is_primary
 
 
 def test_update_subtree():
     # given
     pipeline = get_pipeline()
-    subroot_parent = PrimaryNode('rf')
-    subroot = SecondaryNode('rf', nodes_from=[subroot_parent])
+    subroot_parent = PipelineNode('rf')
+    subroot = PipelineNode('rf', nodes_from=[subroot_parent])
     node_to_replace = pipeline.nodes[2]
 
     # when
@@ -376,6 +365,7 @@ def test_pipeline_fit_time_constraint():
     data = classification_dataset_with_redundant_features()
     train_data, test_data = train_test_data_setup(data=data)
     test_pipeline_first = pipeline_first()
+
     time_constraint = datetime.timedelta(seconds=0)
     predicted_first = None
     computation_time_first = None
@@ -385,20 +375,21 @@ def test_pipeline_fit_time_constraint():
     except Exception as ex:
         received_ex = ex
         computation_time_first = test_pipeline_first.computation_time
-        assert type(received_ex) is TimeoutError
+        assert isinstance(received_ex, TimeoutError)
     comp_time_proc_with_first_constraint = (time.time() - process_start_time)
-    time_constraint = datetime.timedelta(seconds=1)
-    process_start_time = time.time()
 
+    time_constraint = datetime.timedelta(seconds=3)
+    process_start_time = time.time()
     try:
         test_pipeline_first.fit(input_data=train_data, time_constraint=time_constraint)
     except Exception as ex:
         received_ex = ex
-        assert type(received_ex) is TimeoutError
+        assert isinstance(received_ex, TimeoutError)
     comp_time_proc_with_second_constraint = (time.time() - process_start_time)
+
     test_pipeline_second = pipeline_first()
     predicted_second = test_pipeline_second.fit(input_data=train_data,
-                                                time_constraint=datetime.timedelta(seconds=100))
+                                                time_constraint=datetime.timedelta(seconds=2.1))
     computation_time_second = test_pipeline_second.computation_time
     assert comp_time_proc_with_first_constraint < comp_time_proc_with_second_constraint
     assert computation_time_first is None
@@ -407,37 +398,10 @@ def test_pipeline_fit_time_constraint():
     assert predicted_second is not None
 
 
-def test_pipeline_fine_tune_all_nodes_correct(classification_dataset):
-    data = classification_dataset
-
-    first = PrimaryNode(operation_type='scaling')
-    second = PrimaryNode(operation_type='knn')
-    final = SecondaryNode(operation_type='dt', nodes_from=[first, second])
-
-    pipeline = Pipeline(final)
-
-    iterations_total, time_limit_minutes = 5, 1
-    tuned_pipeline = pipeline.fine_tune_all_nodes(loss_function=roc, input_data=data,
-                                                  iterations=iterations_total,
-                                                  timeout=time_limit_minutes)
-    tuned_pipeline.predict(input_data=data)
-
-    is_tuning_finished = True
-
-    assert is_tuning_finished
-
-
-def test_pipeline_structure_print_correct():
-    pipeline = Pipeline(PrimaryNode('ridge'))
-    pipeline.print_structure()
-    is_print_was_correct = True
-    assert is_print_was_correct
-
-
 @pytest.mark.parametrize('data_fixture', ['data_setup', 'file_data_setup'])
 def test_pipeline_unfit(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
-    pipeline = Pipeline(PrimaryNode('logit'))
+    pipeline = Pipeline(PipelineNode('logit'))
     pipeline.fit(data)
     assert pipeline.is_fitted
 
@@ -445,15 +409,15 @@ def test_pipeline_unfit(data_fixture, request):
     assert not pipeline.is_fitted
     assert not pipeline.root_node.fitted_operation
 
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(ValueError):
         assert pipeline.predict(data)
 
 
 def test_ts_forecasting_pipeline_with_poly_features():
     """ Test pipeline with polynomial features in ts forecasting task """
-    lagged_node = PrimaryNode('lagged')
-    poly_node = SecondaryNode('poly_features', nodes_from=[lagged_node])
-    ridge_node = SecondaryNode('ridge', nodes_from=[poly_node])
+    lagged_node = PipelineNode('lagged')
+    poly_node = PipelineNode('poly_features', nodes_from=[lagged_node])
+    ridge_node = PipelineNode('ridge', nodes_from=[poly_node])
     pipeline = Pipeline(ridge_node)
 
     train_data, test_data = get_ts_data(n_steps=25, forecast_length=5)
@@ -461,3 +425,47 @@ def test_ts_forecasting_pipeline_with_poly_features():
     pipeline.fit(train_data)
     prediction = pipeline.predict(test_data)
     assert prediction is not None
+
+
+def test_ts_forecasting_pipeline_with_ets():
+    """ Test for an ets-comprising pipeline, ensuring predict does not contain NaNs """
+    smoothing_node = PipelineNode('smoothing')
+    smoothing_node.parameters = {'window_size': 9}
+    gaussian_filter_node = PipelineNode('gaussian_filter', nodes_from=[smoothing_node])
+    smoothing_node.parameters = {'sigma': 4.747037682823521}
+    ets_node = PipelineNode('ets', nodes_from=[gaussian_filter_node])
+    ets_node.parameters = {
+        'error': 'mul',
+        'trend': 'mul',
+        'seasonal': 'add',
+        'damped_trend': False,
+        'seasonal_periods': 37
+    }
+    pipeline = Pipeline(ets_node)
+
+    train_data, test_data = get_ts_data(n_steps=450, forecast_length=30)
+
+    pipeline.fit(train_data)
+    prediction = pipeline.predict(test_data)
+    assert prediction is not None
+    assert not np.isnan(prediction.predict).any()
+
+
+def test_get_nodes_with_operation():
+    pipeline = pipeline_first()
+    actual_nodes = pipeline.get_nodes_by_name(name='rf')
+    expected_nodes = [pipeline.nodes[2], pipeline.nodes[-1]]
+
+    assert (actual is expected for actual, expected in zip(actual_nodes, expected_nodes))
+
+
+def test_get_node_with_uid():
+    pipeline = pipeline_first()
+
+    uid_of_first_node = pipeline.nodes[0].uid
+    actual_node = pipeline.get_node_by_uid(uid=uid_of_first_node)
+    expected_node = pipeline.nodes[0]
+    assert actual_node is expected_node
+
+    uid_of_non_existent_node = '123456789'
+    assert pipeline.get_node_by_uid(uid=uid_of_non_existent_node) is None

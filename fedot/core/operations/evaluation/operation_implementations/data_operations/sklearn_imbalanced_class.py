@@ -1,14 +1,17 @@
 from copy import copy
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
+import pandas as pd
+from golem.core.log import default_log
 from sklearn.utils import resample
 
 from fedot.core.data.data import InputData, OutputData
-from fedot.core.log import Log, default_log
 from fedot.core.operations.evaluation.operation_implementations.implementation_interfaces import (
     DataOperationImplementation
 )
+from fedot.core.operations.operation_parameters import OperationParameters
+from fedot.utilities.memory import reduce_mem_usage
 
 GLOBAL_PREFIX = 'sklearn_imbalanced_class:'
 
@@ -17,168 +20,186 @@ GLOBAL_PREFIX = 'sklearn_imbalanced_class:'
 
 
 class ResampleImplementation(DataOperationImplementation):
-    """ Implementation of imbalanced bin class transformation for
+    """Implementation of imbalanced bin class transformation for
     classification task by using method from sklearn.utils.resample
 
-    :param balance: balance strategy to transformation of data. Balance can be 'expand_minority' or 'reduce_majority'.
-    In case of expand_minority elements of minor class are expanding to n_samples or to the shape of major class.
-    If reduce_majority, elements of major class are reduce to n_samples or to the shape of minor class.
-    :param replace: implements resampling with replacement. If False, this will implement (sliced) random permutations.
-    :param n_samples: Number of samples to generate.
-    If None number of samples will be equal to the shape of opposite selected transformed class.
-    """
+    Args:
+        params: OperationParameters with the hyperparameters:
+            balance: Data transformation strategy. The balance strategy can be 'expand_minority' or 'reduce_majority'.
+                In case of expand_minority, elements of minor class are expanded to n_samples.
+                Otherwise, with reduce_majority, elements of the major class are reduced to n_samples.
+            replace: Implements resampling with replacement. If False, this will implement (sliced) random permutations.
+            balance_ratio: Transformation ratio can take values in the range [0, 1].
+                With balance_ratio = 0 nothing happens and the data remains the same.
+                In case of balance_ratio = 1 means that both classes will be balanced and the shape of both will be the same.
+                If balance_ratio < 1.0 means that the data of one class will get closer to the shape of the opposite class.
+                If none, the number of samples will be equal to the shape of the opposite selected transformed class.
+    """  # noqa
 
-    def __init__(self, log: Optional[Log] = None, **params: Optional[dict]):
-        super().__init__()
+    def __init__(self, params: Optional[OperationParameters]):
+        super().__init__(params)
+        self.n_samples = None
+        self.log = default_log(self)
 
-        self.balance = params.get('balance')
-        self.replace = params.get('replace')
-        self.n_samples = params.get('n_samples')
-        self.parameters_changed = False
+    @property
+    def balance(self) -> str:
+        return self.params.setdefault('balance', 'expand_minority')
 
-        self.log = log or default_log(__name__)
+    @property
+    def replace(self) -> bool:
+        return self.params.setdefault('replace', False)
+
+    @property
+    def balance_ratio(self) -> float:
+        return self.params.setdefault('balance_ratio', 1.0)
 
     def fit(self, input_data: Optional[InputData]):
-        """ Class doesn't support fit operation
+        """Class doesn't support fit operation
 
-        :param input_data: data with features, target and ids to process
+        Args:
+            input_data: data with features, target and ids to process
         """
         pass
 
-    def get_params(self):
-        """ Method return parameters """
-        params_dict = {
-            'balance': self.balance,
-            'replace': self.replace,
-            'n_samples': self.n_samples,
-        }
-        if self.parameters_changed is True:
-            return tuple([params_dict, ['n_samples']])
-        else:
-            return params_dict
+    def transform(self, input_data: InputData) -> OutputData:
+        """Transformed input data via selected balance strategy for predict stage
 
-    def transform(self, input_data: Optional[InputData], is_fit_pipeline_stage: Optional[bool]) -> Optional[OutputData]:
-        """ Transformed input data via selected balance strategy
+        Args:
+            input_data: data with features, target and ids to process
 
-        :param input_data: data with features, target and ids to process
-        :param is_fit_pipeline_stage: is this fit or predict stage for pipeline
-        :return: output_data: transformed input_data via strategy
+        Returns:
+            output_data: transformed input_data via strategy
         """
+        output_data = self._convert_to_output(input_data, input_data.features,
+                                              data_type=input_data.data_type)
+        return output_data
 
-        new_input_data = copy(input_data)
+    def transform_for_fit(self, input_data: InputData) -> OutputData:
+        """Transformed input data via selected balance strategy for fit stage
 
-        if is_fit_pipeline_stage:
-            features = new_input_data.features
-            target = new_input_data.target
+        Args:
+            input_data: data with features, target and ids to process
 
-            if len(np.unique(target)) != 2:
-                # Imbalanced multi-class balancing is not supported.
-                return self._return_source_data(input_data)
+        Returns:
+            output_data: transformed input_data via strategy
+        """
+        copied_data = copy(input_data)
 
-            unique_class, counts_class = np.unique(target, return_counts=True)
+        if len(np.unique(copied_data.target)) != 2:
+            # Imbalanced multi-class balancing is not supported.
+            return self._convert_to_output(input_data, input_data.features)
 
-            if counts_class[0] == counts_class[1]:
-                # Number of elements from each class are equal. Transformation is not required.
-                return self._return_source_data(input_data)
+        unique_class, number_of_elements = np.unique(copied_data.target, return_counts=True)
 
-            min_data, maj_data = self._get_data_by_target(features, target,
-                                                          unique_class[0], unique_class[1],
-                                                          counts_class[0], counts_class[1])
+        if number_of_elements[0] == number_of_elements[1]:
+            # If number of elements of each class are equal that transformation is not required
+            return self._convert_to_output(input_data, input_data.features)
 
-            self.n_samples = self._convert_to_absolute(min_data, maj_data)
+        if isinstance(copied_data.features, pd.DataFrame):
+            copied_data.features = copied_data.features.to_numpy()
 
-            self.parameters_changed = self._check_and_correct_sample_size(min_data, maj_data)
+        if isinstance(copied_data.target, pd.DataFrame):
+            copied_data.target = copied_data.target.to_numpy()
 
-            if self.balance == 'expand_minority':
-                min_data = self._resample_data(min_data)
+        min_data, maj_data = self._get_data_by_target(copied_data.features, copied_data.target,
+                                                      unique_class, number_of_elements)
 
-            elif self.balance == 'reduce_majority':
-                maj_data = self._resample_data(maj_data)
+        self._check_and_correct_balance_ratio_param()
+        self.n_samples = self._convert_to_absolute(min_data, maj_data)
+        self._check_and_correct_replace_param(min_data, maj_data)
 
-            self.n_samples = self._convert_to_relative(min_data, maj_data)
+        if self.balance == 'expand_minority':
+            prev_shape = min_data.shape
+            min_data = self._resample_data(min_data)
+            self.log.debug(
+                f'{GLOBAL_PREFIX} According to {self.balance} data was changed from {prev_shape} to {min_data.shape}'
+            )
 
-            transformed_data = np.concatenate((min_data, maj_data), axis=0).transpose()
+        elif self.balance == 'reduce_majority':
+            prev_shape = maj_data.shape
+            maj_data = self._resample_data(maj_data)
+            self.log.debug(
+                f'{GLOBAL_PREFIX} According to {self.balance} data was changed from {prev_shape} to {maj_data.shape}'
+            )
 
-            output_data = OutputData(
-                idx=np.arange(transformed_data.shape[1]),
-                features=input_data.features,
-                predict=transformed_data[:-1].transpose(),
-                task=input_data.task,
-                target=transformed_data[-1],
-                data_type=input_data.data_type,
-                supplementary_data=input_data.supplementary_data)
+        transformed_data = np.concatenate((min_data, maj_data), axis=0).transpose()
+
+        if isinstance(input_data.features, pd.DataFrame):
+            predict = reduce_mem_usage(
+                transformed_data[:-1].transpose(),
+                input_data.supplementary_data.col_type_ids['features']
+            )
+
+            target = reduce_mem_usage(
+                transformed_data[-1],
+                input_data.supplementary_data.col_type_ids['target']
+            )
 
         else:
-            output_data = self._return_source_data(input_data)
+            predict = transformed_data[:-1].transpose()
+            target = transformed_data[-1]
+
+        output_data = OutputData(
+            idx=np.arange(transformed_data.shape[1]),
+            features=input_data.features,
+            predict=predict,
+            task=input_data.task,
+            target=target,
+            data_type=input_data.data_type,
+            supplementary_data=input_data.supplementary_data)
 
         return output_data
 
     @staticmethod
-    def _get_data_by_target(features, target, fst_class, snd_class, fst_class_values, snd_class_values):
-        """ Unify features and target in one array and split into classes """
-        if fst_class_values < snd_class_values:
-            min_idx = np.where(target == fst_class)[0]
-            maj_idx = np.where(target == snd_class)[0]
+    def _get_data_by_target(features: Union[np.array, pd.DataFrame], target: Union[np.array, pd.DataFrame],
+                            unique: np.array,
+                            number_of_elements: np.array) -> np.array:
+        """Unify features and target in one array and split into classes
+        """
+        if number_of_elements[0] < number_of_elements[1]:
+            min_idx = np.where(target == unique[0])[0]
+            maj_idx = np.where(target == unique[1])[0]
         else:
-            min_idx = np.where(target == fst_class)[0]
-            maj_idx = np.where(target == snd_class)[0]
+            min_idx = np.where(target == unique[1])[0]
+            maj_idx = np.where(target == unique[0])[0]
 
-        minority_data = np.hstack((features[min_idx], target[min_idx]))
-        majority_data = np.hstack((features[maj_idx], target[maj_idx]))
+        minority_data = np.hstack((features[min_idx], target[min_idx].reshape(-1, 1)))
+        majority_data = np.hstack((features[maj_idx], target[maj_idx].reshape(-1, 1)))
 
         return minority_data, majority_data
 
-    def _check_and_correct_sample_size(self, min_data, maj_data):
-        """ Method checks if selected values in n_sample are incorrect - correct it otherwise
+    def _check_and_correct_replace_param(self, min_data: np.array, maj_data: np.array):
+        """Method checks if selected replace parameter is correct
 
-        :param min_data: minority data from input data
-        :param maj_data: majority data from input data
+        Args:
+            min_data: minority data from input data
+            maj_data: majority data from input data
         """
-        prefix = "sklearn_imbalanced_class Warning: n_samples was changed"
-        was_changed = False
+        if self.replace is False:
+            if self.balance == 'expand_minority' and self.n_samples >= min_data.shape[0]:
+                self.params.update(replace=True)
+            elif self.balance == 'reduce_majority' and self.n_samples >= maj_data.shape[0]:
+                self.params.update(replace=True)
+            self.log.debug(f'{GLOBAL_PREFIX} resample operation allow repeats in data')
 
-        if self.replace is False and (self.n_samples > min_data.shape[0] or self.n_samples > maj_data.shape[0]):
-            prev_n_samples = self.n_samples
-            self.n_samples = self._set_sample_size(min_data, maj_data)
-            self.log.info(f'{prefix[0]} from {prev_n_samples} to {self.n_samples}')
-            was_changed = True
+    def _check_and_correct_balance_ratio_param(self):
+        """Method checks if selected balance_ratio parameter is correct
+        """
+        if not self.balance_ratio:
+            self.params.update(balance_ratio=1)
+        if self.balance_ratio < 0 or self.balance_ratio > 1:
+            self.params.update(balance_ratio=1)
+            self.log.debug(f'{GLOBAL_PREFIX} balance ratio set to full balance')
 
-        return was_changed
-
-    def _convert_to_absolute(self, min_data, maj_data):
-        self.log.debug(f'{GLOBAL_PREFIX} n_samples was converted to absolute values')
-
-        if self.balance == 'expand_minority':
-            return round(min_data.shape[0] * self.n_samples)
-
-        elif self.balance == 'reduce_majority':
-            return round(maj_data.shape[0] * self.n_samples)
-
-    def _convert_to_relative(self, min_data, maj_data):
-        self.log.debug(f'{GLOBAL_PREFIX} n_samples was converted to relative values')
+    def _convert_to_absolute(self, min_data: np.array, maj_data: np.array) -> float:
+        self.log.debug(f'{GLOBAL_PREFIX} set n_samples in absolute values due to balance_ratio')
+        difference = maj_data.shape[0] - min_data.shape[0]
 
         if self.balance == 'expand_minority':
-            return round(self.n_samples / min_data.shape[0], 2)
+            return round(difference * self.balance_ratio + min_data.shape[0])
 
         elif self.balance == 'reduce_majority':
-            return round(self.n_samples / maj_data.shape[0], 2)
+            return round(maj_data.shape[0] - difference * self.balance_ratio)
 
-    def _set_sample_size(self, min_data, maj_data):
-        if self.balance == 'expand_minority':
-            return maj_data.shape[0]
-
-        elif self.balance == 'reduce_majority':
-            return min_data.shape[0]
-
-    def _resample_data(self, data):
+    def _resample_data(self, data: np.array):
         return resample(data, replace=self.replace, n_samples=self.n_samples)
-
-    def _return_source_data(self, input_data):
-        return OutputData(
-            idx=input_data.idx,
-            features=input_data.features,
-            predict=input_data.features,
-            task=input_data.task,
-            target=input_data.target,
-            data_type=input_data.data_type,
-            supplementary_data=input_data.supplementary_data)

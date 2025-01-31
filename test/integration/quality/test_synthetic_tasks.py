@@ -1,23 +1,22 @@
+import logging
 import os
-import random
 from functools import partial
 
-import numpy as np
 from sklearn.metrics import mean_squared_error
 
-from fedot.api.main import Fedot
+from fedot import Fedot
 from fedot.core.data.data import InputData
 from fedot.core.data.data_split import train_test_data_setup
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
 from fedot.core.repository.tasks import Task, TaskTypesEnum
-from test.unit.composer.test_composer import to_numerical
+from test.integration.composer.test_composer import to_categorical_codes
 
 
 def get_regression_pipeline():
-    first = PrimaryNode(operation_type='rfe_lin_reg')
-    final = SecondaryNode(operation_type='ridge',
-                          nodes_from=[first])
+    first = PipelineNode(operation_type='scaling')
+    final = PipelineNode(operation_type='ridge',
+                         nodes_from=[first])
 
     pipeline = Pipeline(final)
     return pipeline
@@ -28,14 +27,11 @@ def get_regression_data():
     file = '../../data/simple_regression_train.csv'
     input_data = InputData.from_csv(
         os.path.join(test_file_path, file), task=Task(TaskTypesEnum.regression))
-    input_data.idx = to_numerical(categorical_ids=input_data.idx)
+    input_data.idx = to_categorical_codes(categorical_ids=input_data.idx)
     return input_data
 
 
-def custom_metric_for_synt_data(pipeline, fit_data, predict_data, reference_data=None):
-    np.random.seed(42)
-    random.seed(42)
-
+def custom_metric_for_synt_data(pipeline, fit_data, predict_data, **kwargs):
     # reference_data is added for compatibility with composer interface
     pipeline.fit_from_scratch(fit_data)
     results = pipeline.predict(predict_data)
@@ -69,8 +65,6 @@ def test_synthetic_regression_automl():
     If correct, the best fitness should be close to 0.
     """
 
-    # TODO extend test
-
     ref_pipeline = get_regression_pipeline()
     input_data = get_regression_data()
 
@@ -84,16 +78,15 @@ def test_synthetic_regression_automl():
     test_data.target = ground_truth.predict
 
     # run automl
-    auto_model = Fedot(problem='regression', verbose_level=0, timeout=1,
-                       composer_params={'composer_metric': metric_func,
-                                        'cv_folds': None,
-                                        'available_operations': ['rfe_lin_reg',
-                                                                 'rfe_non_lin_reg',
-                                                                 'ridge',
-                                                                 'linear']},
-                       preset='best_quality')
-    auto_model.fit(features=test_data.features, target=test_data.target)
-
-    auto_model.current_pipeline.fit(train_data)
+    auto_model = Fedot(problem='regression', logging_level=logging.DEBUG,
+                       timeout=1, metric=metric_func, cv_folds=None,
+                       available_operations=['scaling',
+                                             'normalization',
+                                             'pca',
+                                             'ridge',
+                                             'linear'],
+                       preset='best_quality',
+                       with_tuning=False)
+    auto_model.fit(train_data)
 
     assert min(auto_model.history.historical_fitness[-1]) < 0.01

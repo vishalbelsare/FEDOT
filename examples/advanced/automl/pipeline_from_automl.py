@@ -1,12 +1,12 @@
 from datetime import timedelta
 
-from fedot.core.repository.operation_types_repository import OperationTypesRepository
 from sklearn.metrics import roc_auc_score as roc_auc
 
-from cases.data.data_utils import get_scoring_case_data_paths
+from examples.real_cases.data.data_utils import get_scoring_case_data_paths
 from fedot.core.data.data import InputData
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
+from fedot.core.pipelines.node import PipelineNode
 from fedot.core.pipelines.pipeline import Pipeline
+from fedot.core.repository.operation_types_repository import OperationTypesRepository
 
 
 # TODO not working now - add switch to other repository.json
@@ -26,13 +26,13 @@ def run_pipeline_from_automl(train_file_path: str, test_file_path: str,
 
         testing_target = test_data.target
 
-        node_scaling = PrimaryNode('scaling')
-        node_tpot = PrimaryNode('tpot_class')
+        node_scaling = PipelineNode('scaling')
+        node_tpot = PipelineNode('tpot_class')
 
-        node_tpot.custom_params = {'timeout': max_run_time.seconds}
+        node_tpot.parameters = {'timeout': max_run_time.seconds}
 
-        node_lda = SecondaryNode('lda', nodes_from=[node_scaling])
-        node_rf = SecondaryNode('rf', nodes_from=[node_tpot, node_lda])
+        node_lda = PipelineNode('lda', nodes_from=[node_scaling])
+        node_rf = PipelineNode('rf', nodes_from=[node_tpot, node_lda])
         pipeline = Pipeline(node_rf)
 
         pipeline.fit(train_data)

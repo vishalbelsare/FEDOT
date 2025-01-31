@@ -1,17 +1,16 @@
 import numpy as np
+from golem.core.tuning.simultaneous import SimultaneousTuner
 from sklearn.metrics import roc_auc_score as roc_auc
 from sklearn.model_selection import train_test_split
 
 from examples.simple.classification.classification_pipelines import classification_random_forest_pipeline
 from fedot.core.data.data import InputData
-from fedot.core.pipelines.node import PrimaryNode, SecondaryNode
-from fedot.core.pipelines.pipeline import Pipeline
-from fedot.core.pipelines.tuning.unified import PipelineTuner
+from fedot.core.pipelines.tuning.tuner_builder import TunerBuilder
 from fedot.core.repository.dataset_types import DataTypesEnum
+from fedot.core.repository.metrics_repository import ClassificationMetricsEnum
 from fedot.core.repository.tasks import Task, TaskTypesEnum
+from fedot.core.utils import set_random_seed
 from fedot.utilities.synth_dataset_generator import classification_dataset
-
-np.random.seed(2020)
 
 
 def get_classification_dataset(features_options, samples_amount=250,
@@ -109,7 +108,7 @@ def run_classification_tuning_experiment(pipeline, tuner=None):
                                   data_type=DataTypesEnum.table)
 
         # Fit it
-        pipeline.fit_from_scratch(train_input)
+        pipeline.fit(train_input)
 
         # Predict
         predicted_labels = pipeline.predict(predict_input)
@@ -118,22 +117,31 @@ def run_classification_tuning_experiment(pipeline, tuner=None):
         print(f"{roc_auc(y_test, preds):.4f}\n")
 
         if tuner is not None:
-            print(f'Start tuning process ...')
+            print('Start tuning process ...')
+            pipeline_tuner = (
+                TunerBuilder(task)
+                .with_tuner(tuner)
+                .with_metric(ClassificationMetricsEnum.ROCAUC)
+                .with_iterations(50)
+                .build(train_input)
+            )
+            tuned_pipeline = pipeline_tuner.tune(pipeline)
 
-            pipeline_tuner = tuner(pipeline=pipeline, task=task,
-                                   iterations=50)
-            tuned_pipeline = pipeline_tuner.tune_pipeline(input_data=train_input,
-                                                          loss_function=roc_auc)
+            # Fit it
+            tuned_pipeline.fit(train_input)
 
             # Predict
+            print('predict')
             predicted_values_tuned = tuned_pipeline.predict(predict_input)
             preds_tuned = predicted_values_tuned.predict
 
-            print(f'Obtained metrics after tuning:')
+            print('Obtained metrics after tuning:')
             print(f"{roc_auc(y_test, preds_tuned):.4f}\n")
 
 
 # Script for testing is pipeline can process different datasets for classification
 if __name__ == '__main__':
+    set_random_seed(2020)
+
     run_classification_tuning_experiment(pipeline=classification_random_forest_pipeline(),
-                                         tuner=PipelineTuner)
+                                         tuner=SimultaneousTuner)
